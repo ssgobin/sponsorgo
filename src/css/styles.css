@@ -1133,3 +1133,206 @@ tr:hover td {
     min-width: auto;
   }
 }
+
+@media (max-width: 480px) {
+  html, body {
+    font-size: 14px;
+  }
+
+  .app-shell {
+    grid-template-columns: 1fr;
+    min-height: 100vh;
+  }
+
+  .sidebar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: auto;
+    flex-direction: row;
+    justify-content: space-around;
+    padding: 8px 12px;
+    border-right: none;
+    border-top: 1px solid var(--border);
+    z-index: 100;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+  }
+
+  .sidebar .brand,
+  .sidebar .sidebar-brand,
+  .sidebar .sidebar-footer {
+    display: none;
+  }
+
+  .nav {
+    flex-direction: row;
+    justify-content: space-around;
+    width: 100%;
+    gap: 0;
+  }
+
+  .nav-button {
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 12px;
+    font-size: 11px;
+  }
+
+  .nav-icon {
+    font-size: 18px;
+  }
+
+  .main {
+    padding: 16px;
+    padding-bottom: 80px;
+  }
+
+  .topbar {
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .topbar-info h2 {
+    font-size: 18px;
+  }
+
+  .actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .actions .button {
+    flex: 1;
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+
+  .grid-4, .grid-3, .grid-2, .form-row, .form-row.three {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .card {
+    padding: 16px;
+    border-radius: 12px;
+  }
+
+  .card-header {
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .metric-value {
+    font-size: 24px;
+  }
+
+  .metric-label {
+    font-size: 11px;
+  }
+
+  .table-wrap {
+    margin: 0 -16px;
+    border-radius: 0;
+  }
+
+  table {
+    font-size: 12px;
+  }
+
+  th, td {
+    padding: 10px 8px;
+  }
+
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .list-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 14px 16px;
+  }
+
+  .auth-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-panel {
+    padding: 24px;
+  }
+
+  .auth-card {
+    max-width: 100%;
+  }
+
+  .auth-card h1 {
+    font-size: 24px;
+  }
+
+  .button {
+    padding: 12px 16px;
+    font-size: 14px;
+  }
+
+  .modal-overlay {
+    padding: 12px;
+    align-items: flex-end;
+  }
+
+  .modal {
+    padding: 20px;
+    border-radius: 16px 16px 0 0;
+    max-width: 100%;
+  }
+
+  .modal.large {
+    max-width: 100%;
+    border-radius: 16px 16px 0 0;
+  }
+
+  .file-label {
+    padding: 14px 16px;
+  }
+
+  .features {
+    flex-direction: column;
+  }
+
+  .features span {
+    font-size: 12px;
+  }
+
+  .toast-container {
+    top: auto;
+    bottom: 80px;
+    left: 12px;
+    right: 12px;
+  }
+
+  .toast {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .checkbox-list {
+    max-height: 140px;
+  }
+
+  .empty-state {
+    padding: 32px 16px;
+  }
+
+  .empty-state h3 {
+    font-size: 16px;
+  }
+
+  .notice {
+    font-size: 13px;
+    padding: 12px 14px;
+  }
+}

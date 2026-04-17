@@ -4,7 +4,7 @@ export function loginTemplate() {
       <div class="auth-panel">
         <div class="auth-card">
           <div class="brand">
-            <img src="/src/assets/img/sponsorgo.png" alt="SponsorGo" class="brand-logo-img" />
+            <img src="/sponsorgo.png" alt="SponsorGo" class="brand-logo-img" />
           </div>
           <h1>Entrar</h1>
           <p>Faça login com sua conta administrativa.</p>
@@ -41,7 +41,7 @@ export function appTemplate() {
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand">
-          <img src="/src/assets/img/sponsorgo.png" alt="SponsorGo" class="brand-logo-sidebar" />
+          <img src="/sponsorgo.png" alt="SponsorGo" class="brand-logo-sidebar" />
         </div>
         <nav id="nav" class="nav"></nav>
         <div class="sidebar-footer">
@@ -50,7 +50,7 @@ export function appTemplate() {
         </div>
         <div class="sidebar-brand">
           <span class="brand-label">Desenvolvido por</span>
-          <img src="/src/assets/img/logo_st.png" alt="SponsorTech" class="brand-logo" />
+          <img src="/logo_st.png" alt="SponsorTech" class="brand-logo" />
         </div>
       </aside>
       <main class="main">
