@@ -31,9 +31,15 @@ function formatDeviceStatus(status) {
 }
 
 export function dashboardView(data) {
-  const { metrics, devices, activity, isDemo } = data;
+  const { metrics, devices, activity, isDemo, videos } = data;
 
   const hasData = devices.length > 0 || metrics.onlineDevices > 0;
+
+  const getVideoTitle = (videoId) => {
+    if (!videoId) return '—';
+    const video = videos?.find(v => v.id === videoId);
+    return video?.title || videoId;
+  };
 
   const cards = `
     <section class="grid-4">
@@ -77,7 +83,7 @@ export function dashboardView(data) {
       <td><strong>${device.name || '—'}</strong><div class="card-subtitle">${device.id || '—'}</div></td>
       <td>${device.car || '—'}</td>
       <td><span class="status ${device.status || 'offline'}">${formatDeviceStatus(device.status)}</span></td>
-      <td>${device.currentVideoId || device.currentVideo || '—'}</td>
+      <td>${getVideoTitle(device.currentVideoId) || device.currentVideo || '—'}</td>
       <td>${formatDate(lastContact) || '—'}</td>
       <td>${device.battery >= 0 ? `${device.battery}%` : '—'}</td>
       <td style="width:80px;">
@@ -391,6 +397,12 @@ export function playlistsView(data) {
 }
 
 export function monitorView(data) {
+  const getVideoTitle = (videoId) => {
+    if (!videoId) return '—';
+    const video = data.videos?.find(v => v.id === videoId);
+    return video?.title || videoId;
+  };
+
   const rows = data.devices.length > 0 ? data.devices.map((device) => {
     const lastContact = device.lastHeartbeat 
       ? (device.lastHeartbeat.toDate ? device.lastHeartbeat.toDate() : new Date(device.lastHeartbeat))
@@ -399,7 +411,7 @@ export function monitorView(data) {
     <tr>
       <td><strong>${device.name || '—'}</strong></td>
       <td><span class="status ${device.status || 'offline'}">${formatDeviceStatus(device.status)}</span></td>
-      <td>${device.currentVideoId || device.currentVideo || '—'}</td>
+      <td>${getVideoTitle(device.currentVideoId) || device.currentVideo || '—'}</td>
       <td>${formatDate(lastContact) || '—'}</td>
       <td>${device.battery >= 0 ? `${device.battery}%` : '—'}</td>
       <td style="width:50px;"><button class="button-edit" data-edit="tablet" data-id="${device.id}" title="Editar">✎</button></td>
