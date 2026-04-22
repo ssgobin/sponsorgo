@@ -1,4 +1,3 @@
-import '../css/styles.css';
 import { loginTemplate, appTemplate } from './templates.js';
 import { dashboardView, devicesView, videosView, playlistsView, monitorView, settingsView } from './views.js';
 import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylist, fetchCollection, deleteDocument, assignPlaylistToDevice, subscribeToDevices, subscribeToPlaylists, updateDevice, updatePlaylist } from './firebase.js';
