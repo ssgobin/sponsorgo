@@ -2,6 +2,7 @@ import { loginTemplate, appTemplate } from './templates.js';
 import { dashboardView, devicesView, videosView, playlistsView, monitorView, settingsView } from './views.js';
 import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylist, fetchCollection, deleteDocument, assignPlaylistToDevice, subscribeToDevices, subscribeToPlaylists, updateDevice, updatePlaylist } from './firebase.js';
 import { hasAppwriteConfig, uploadVideo, deleteVideoFile } from './appwrite.js';
+import { exportToExcel } from './export-excel.js';
 
 const app = document.querySelector('#app');
 const isDemo = !(hasFirebaseConfig && hasAppwriteConfig);
@@ -162,7 +163,7 @@ function renderView() {
     videos: videosView(payload),
     playlists: playlistsView(payload),
     monitor: monitorView(payload),
-    settings: settingsView(isDemo),
+    settings: settingsView(payload, isDemo),
   };
 
   view.innerHTML = views[state.route] || views.dashboard;
@@ -226,6 +227,7 @@ function bindForms() {
   bindDeleteButtons();
   bindEditButtons();
   bindFileInput();
+  bindExportButton();
 }
 
 function bindFileInput() {
@@ -673,6 +675,16 @@ function setupRealtimeListeners() {
     unsubDevices();
     unsubPlaylists();
   };
+}
+
+function bindExportButton() {
+  const exportBtn = document.getElementById('export-excel-btn');
+  if (!exportBtn) return;
+  
+  exportBtn.addEventListener('click', () => {
+    exportToExcel(state, 'relatorio-sponsorgo');
+    showToast('Relatório Exportado', 'O arquivo Excel foi baixado com sucesso.', 'success');
+  });
 }
 
 if (hasFirebaseConfig && auth) {

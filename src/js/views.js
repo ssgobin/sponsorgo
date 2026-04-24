@@ -1,4 +1,5 @@
 import { layoutView } from './templates.js';
+import { exportToExcel } from './export-excel.js';
 
 function formatDate(timestamp) {
   if (!timestamp) return '—';
@@ -484,7 +485,13 @@ export function monitorView(data) {
   );
 }
 
-export function settingsView(isDemo) {
+export function settingsView(data, isDemo) {
+  const { metrics, devices, videos, playlists } = data || {};
+  
+  const handleExport = () => {
+    exportToExcel({ metrics, devices, videos, playlists }, 'relatorio-sponsorgo');
+  };
+
   return layoutView(
     'Configurações',
     'Configure e personalize o sistema.',
@@ -514,6 +521,20 @@ export function settingsView(isDemo) {
             </div>
           </div>
           ${isDemo ? '<div class="notice info">Configure o Firebase no arquivo config.js para usar dados reais.</div>' : ''}
+        </article>
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Exportar Relatório</h3>
+              <p class="card-subtitle">Baixe todos os dados em planilha Excel</p>
+            </div>
+          </div>
+          <button class="button primary" id="export-excel-btn" style="margin-top: 16px;">
+            Baixar Relatório Excel
+          </button>
+          <p class="text-muted" style="margin-top: 12px; font-size: 13px;">
+            O relatório inclui: Tablets, Vídeos, Playlists e Resumo geral.
+          </p>
         </article>
         <article class="card">
           <div class="card-header">
