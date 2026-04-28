@@ -102,3 +102,29 @@ export async function updatePlaylist(playlistId, payload) {
   await setDoc(ref, { ...payload, updatedAt: serverTimestamp() }, { merge: true });
   return ref.id;
 }
+
+export function subscribeToConnectionRequests(callback) {
+  if (!db) return () => {};
+  const q = query(collection(db, 'connectionRequests'), orderBy('createdAt', 'desc'));
+  return onSnapshot(q, (snapshot) => {
+    const data = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    callback(data);
+  });
+}
+
+export async function approveConnectionRequest(deviceId, payload) {
+  if (!db) throw new Error('Firebase não configurado.');
+  await setDoc(doc(db, 'connectionRequests', deviceId), {
+    status: 'approved',
+    approvedAt: serverTimestamp(),
+    approvedBy: payload.approvedBy || 'admin',
+  }, { merge: true });
+}
+
+export async function rejectConnectionRequest(deviceId) {
+  if (!db) throw new Error('Firebase não configurado.');
+  await setDoc(doc(db, 'connectionRequests', deviceId), {
+    status: 'rejected',
+    rejectedAt: serverTimestamp(),
+  }, { merge: true });
+}

@@ -1,6 +1,6 @@
 import { loginTemplate, appTemplate } from './templates.js';
-import { dashboardView, devicesView, videosView, playlistsView, monitorView, mapView, settingsView } from './views.js';
-import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylist, fetchCollection, deleteDocument, assignPlaylistToDevice, subscribeToDevices, subscribeToPlaylists, updateDevice, updatePlaylist } from './firebase.js';
+import { dashboardView, devicesView, videosView, playlistsView, monitorView, mapView, settingsView, connectionsView } from './views.js';
+import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylist, fetchCollection, deleteDocument, assignPlaylistToDevice, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, updatePlaylist, approveConnectionRequest } from './firebase.js';
 import { hasAppwriteConfig, uploadVideo, deleteVideoFile } from './appwrite.js';
 import { exportToExcel } from './export-excel.js';
 
@@ -19,6 +19,7 @@ const state = {
   devices: [],
   videos: [],
   playlists: [],
+  connectionRequests: [],
   activity: [],
   loading: true,
   unsubscribe: null,
@@ -27,6 +28,7 @@ const state = {
 const navItems = [
   { key: 'dashboard', label: 'Visão Geral', icon: '◫' },
   { key: 'devices', label: 'Tablets', icon: '▣' },
+  { key: 'connections', label: 'Conexões', icon: '🔗' },
   { key: 'videos', label: 'Vídeos', icon: '▶' },
   { key: 'playlists', label: 'Playlists', icon: '≣' },
   { key: 'monitor', label: 'Monitoramento', icon: '◌' },
@@ -85,10 +87,11 @@ async function loadData() {
   }
 
   try {
-    const [devicesData, videosData, playlistsData] = await Promise.all([
+    const [devicesData, videosData, playlistsData, connectionRequestsData] = await Promise.all([
       fetchCollection('devices'),
       fetchCollection('videos'),
       fetchCollection('playlists'),
+      fetchCollection('connectionRequests'),
     ]);
 
     const now = Date.now();
@@ -109,6 +112,7 @@ async function loadData() {
     state.devices = devicesWithStatus;
     state.videos = videosData;
     state.playlists = playlistsData;
+    state.connectionRequests = connectionRequestsData.filter(r => r.status === 'pending');
 
     const onlineCount = devicesWithStatus.filter(d => d.status === 'online').length;
     const offlineCount = devicesWithStatus.filter(d => d.status === 'offline').length;
@@ -161,6 +165,7 @@ function renderView() {
   const views = {
     dashboard: dashboardView(payload),
     devices: devicesView(payload),
+    connections: connectionsView(payload),
     videos: videosView(payload),
     playlists: playlistsView(payload),
     monitor: monitorView(payload),
@@ -356,6 +361,7 @@ function bindForms() {
   bindEditButtons();
   bindFileInput();
   bindExportButton();
+  bindConnectButtons();
 }
 
 function bindFileInput() {
@@ -644,6 +650,7 @@ function bindDeviceForm() {
       currentVideo: null,
       lastSeen: null,
       sync: null,
+      createdAt: new Date(),
     };
 
     try {
@@ -656,6 +663,87 @@ function bindDeviceForm() {
       showToast('Erro', error.message || 'Não foi possível cadastrar o tablet.', 'error');
     }
   });
+}
+
+function bindConnectButtons() {
+  document.querySelectorAll('[data-connect]').forEach(button => {
+    button.addEventListener('click', () => {
+      const deviceId = button.dataset.connect;
+      if (deviceId && !button.disabled) {
+        showConnectDeviceModal(deviceId);
+      }
+    });
+  });
+}
+
+function showConnectDeviceModal(deviceId) {
+  const existingDevice = state.devices.find(d => d.id === deviceId);
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal">
+      <span class="modal-icon info">🔗</span>
+      <h3>Conectar Tablet</h3>
+      <p>Configure o dispositivo: <strong>${deviceId}</strong></p>
+      <form id="connect-device-form">
+        <div class="form-group">
+          <label>Nome do Tablet</label>
+          <input class="input" name="name" value="${existingDevice?.name || ''}" placeholder="Tablet Corolla 01" required />
+        </div>
+        <div class="form-group">
+          <label>Veículo</label>
+          <input class="input" name="car" value="${existingDevice?.car || ''}" placeholder="Toyota Corolla" />
+        </div>
+        <div class="form-group">
+          <label>Motorista</label>
+          <input class="input" name="driver" value="${existingDevice?.driver || ''}" placeholder="João Silva" />
+        </div>
+        <div class="modal-actions">
+          <button class="button secondary" type="button" id="modal-cancel">Cancelar</button>
+          <button class="button primary" type="submit">Conectar</button>
+        </div>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  document.getElementById('modal-cancel').onclick = () => modal.remove();
+  modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+  document.getElementById('connect-device-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const payload = {
+      name: String(formData.get('name')).trim(),
+      car: String(formData.get('car')).trim(),
+      driver: String(formData.get('driver')).trim(),
+      status: 'offline',
+      battery: null,
+      currentVideo: null,
+      lastSeen: null,
+      createdAt: new Date(),
+    };
+
+    try {
+      showLoading('Conectando...');
+
+      if (hasFirebaseConfig) {
+        await updateDevice(deviceId, payload);
+        await approveConnectionRequest(deviceId, { approvedBy: state.user?.email || 'admin' });
+      }
+
+      modal.remove();
+      hideLoading();
+      await loadData();
+      render();
+      showToast('Tablet Conectado', `${payload.name} foi conectado com sucesso.`, 'success');
+    } catch (error) {
+      hideLoading();
+      console.error('Erro ao conectar dispositivo:', error);
+      showToast('Erro', 'Não foi possível conectar o tablet.', 'error');
+    }
+});
 }
 
 function bindVideoForm() {
@@ -788,15 +876,24 @@ function setupRealtimeListeners() {
     };
 
     updateDeviceStatusUI(devicesWithStatus);
+    render();
   });
 
   const unsubPlaylists = subscribeToPlaylists((playlistsData) => {
     state.playlists = playlistsData;
+    render();
+  });
+
+  const unsubConnectionRequests = subscribeToConnectionRequests((requests) => {
+    const pendingRequests = requests.filter(r => r.status === 'pending');
+    state.connectionRequests = pendingRequests;
+    render();
   });
 
   state.unsubscribe = () => {
     unsubDevices();
     unsubPlaylists();
+    unsubConnectionRequests();
   };
 }
 

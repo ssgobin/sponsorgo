@@ -610,3 +610,65 @@ export function settingsView(data, isDemo) {
     '<button class="button ghost" data-action="logout">Sair</button>'
   );
 }
+
+export function connectionsView(data) {
+  const pendingRequests = data.connectionRequests || [];
+  const devices = data.devices || [];
+
+  const deviceRows = pendingRequests.map((request) => {
+    const existingDevice = devices.find(d => d.id === request.deviceId);
+    return `
+      <div class="connection-card" style="background: #1a1a2e; padding: 16px; margin-bottom: 12px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #333;">
+        <div>
+          <h4 style="margin: 0 0 8px; color: #00ff00;">${request.deviceId}</h4>
+          <p style="margin: 0; color: #aaa; font-size: 13px;">
+            Solicitado: ${formatDate(request.createdAt)}
+          </p>
+        </div>
+        <button class="button primary" data-connect="${request.deviceId}" ${existingDevice && existingDevice.name ? 'disabled' : ''}>
+          ${existingDevice && existingDevice.name ? 'Já conectado' : 'Conectar'}
+        </button>
+      </div>
+    `;
+  }).join('');
+
+  const connectedDevices = devices.filter(d => d.name && d.createdAt);
+
+  const connectedRows = connectedDevices.map(device => `
+    <div class="list-item" data-device-id="${device.id}">
+      <div>
+        <p class="list-item-title">${device.name || '—'}</p>
+        <p class="list-item-subtitle">${device.id} • ${device.car || 'Sem veículo'} • ${device.driver || 'Sem motorista'}</p>
+      </div>
+      <span class="pill active">Conectado</span>
+    </div>
+  `).join('');
+
+  return layoutView(
+    'Conexões',
+    'Gerencie a conexão dos tablets.',
+    `
+      <section class="grid-2">
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Tablets Pendentes</h3>
+              <p class="card-subtitle">Aguardando aprovação</p>
+            </div>
+          </div>
+          ${pendingRequests.length > 0 ? deviceRows : '<p class="text-muted">Nenhum tablet pendente</p>'}
+        </article>
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Tablets Conectados</h3>
+              <p class="card-subtitle">Já approvedos</p>
+            </div>
+          </div>
+          ${connectedDevices.length > 0 ? connectedRows : '<p class="text-muted">Nenhum tablet conectado</p>'}
+        </article>
+      </section>
+    `,
+    ''
+  );
+}
