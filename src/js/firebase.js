@@ -13,6 +13,7 @@ import {
   deleteDoc,
   where,
   onSnapshot,
+  updateDoc,
 } from 'firebase/firestore';
 import { firebaseConfig as fbConfig } from './config.js';
 
@@ -53,15 +54,32 @@ export async function addPlaylist(payload) {
   return ref.id;
 }
 
-export async function fetchCollection(name) {
+export async function fetchCollection(name, includeDeleted = false) {
   if (!db) return [];
-  const snap = await getDocs(query(collection(db, name), orderBy('createdAt', 'desc')));
-  return snap.docs.map((item) => ({ id: item.id, ...item.data() }));
+  const q = query(collection(db, name), orderBy('createdAt', 'desc'));
+  const snap = await getDocs(q);
+  let data = snap.docs.map((item) => ({ id: item.id, ...item.data() }));
+  
+  if (name === 'playlists' && !includeDeleted) {
+    data = data.filter(p => !p.deletedAt);
+  }
+  
+  return data;
 }
 
 export async function deleteDocument(collectionName, docId) {
   if (!db) throw new Error('Firebase não configurado.');
-  await deleteDoc(doc(db, collectionName, docId));
+  
+  if (collectionName === 'playlists') {
+    await updateDoc(doc(db, collectionName, docId), { deletedAt: serverTimestamp() });
+  } else {
+    await deleteDoc(doc(db, collectionName, docId));
+  }
+}
+
+export async function permanentlyDeletePlaylist(docId) {
+  if (!db) throw new Error('Firebase não configurado.');
+  await deleteDoc(doc(db, 'playlists', docId));
 }
 
 export async function assignPlaylistToDevice(deviceId, playlistId) {
