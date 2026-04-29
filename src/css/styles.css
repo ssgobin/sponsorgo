@@ -115,13 +115,13 @@ a {
 }
 
 .brand-logo-img {
-  height: 48px;
+  height: 80px;
   width: auto;
   object-fit: contain;
 }
 
 .brand-logo-sidebar {
-  height: 36px;
+  height: 56px;
   width: auto;
   object-fit: contain;
 }
@@ -200,7 +200,7 @@ a {
 }
 
 .brand-logo {
-  height: 28px;
+  height: 32px;
   width: auto;
   object-fit: contain;
 }
