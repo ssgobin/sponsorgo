@@ -102,7 +102,9 @@ export function subscribeToPlaylists(callback) {
   if (!db) return () => {};
   const q = query(collection(db, 'playlists'), orderBy('createdAt', 'desc'));
   return onSnapshot(q, (snapshot) => {
-    const data = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    const data = snapshot.docs
+      .map((item) => ({ id: item.id, ...item.data() }))
+      .filter((playlist) => !playlist.deletedAt);
     callback(data);
   });
 }

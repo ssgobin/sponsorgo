@@ -487,18 +487,6 @@ export function monitorView(data) {
 
 export function mapView(data) {
   const devicesWithLocation = data.devices.filter(d => d.location && d.location.latitude != null && d.location.longitude != null);
-  
-  const devicesJson = JSON.stringify(devicesWithLocation.map(d => ({
-    id: d.id,
-    name: d.name || d.id,
-    car: d.car || '',
-    driver: d.driver || '',
-    status: d.status || 'offline',
-    lat: d.location.latitude,
-    lng: d.location.longitude,
-    accuracy: d.location.accuracy || 0,
-    lastUpdate: d.location.timestamp ? new Date(d.location.timestamp).toLocaleString('pt-BR') : '—'
-  })));
 
   return layoutView(
     'Mapa',
@@ -530,9 +518,6 @@ export function mapView(data) {
           </div>
         </article>
       </section>
-      <script>
-        window.mapDevicesData = ${devicesJson};
-      </script>
     `,
     '<button class="button ghost" data-action="logout">Sair</button>'
   );
