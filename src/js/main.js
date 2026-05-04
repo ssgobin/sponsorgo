@@ -1,8 +1,8 @@
 import { loginTemplate, appTemplate } from './templates.js';
-import { dashboardView, devicesView, videosView, playlistsView, schedulesView, monitorView, mapView, settingsView, connectionsView } from './views.js';
-import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylist, addPlaylistSchedule, fetchCollection, deleteDocument, syncPlaylistAssignments, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, subscribeToPlaylistSchedules, updateDevice, updatePlaylist, approveConnectionRequest } from './firebase.js';
+import { dashboardView, devicesView, videosView, playlistsView, monitorView, mapView, settingsView, connectionsView } from './views.js';
+import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylist, fetchCollection, deleteDocument, assignPlaylistToDevice, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, updatePlaylist, approveConnectionRequest } from './firebase.js';
 import { hasAppwriteConfig, uploadVideo, deleteVideoFile } from './appwrite.js';
-import { displayText, escapeHtml } from './dom.js';
+import { exportToExcel } from './export-excel.js';
 
 const app = document.querySelector('#app');
 const isDemo = !(hasFirebaseConfig && hasAppwriteConfig);
@@ -19,7 +19,6 @@ const state = {
   devices: [],
   videos: [],
   playlists: [],
-  schedules: [],
   connectionRequests: [],
   activity: [],
   loading: true,
@@ -27,7 +26,6 @@ const state = {
 };
 
 const ONLINE_THRESHOLD = 2 * 60 * 1000;
-let pendingRealtimeRender = false;
 
 const navItems = [
   { key: 'dashboard', label: 'Visão Geral', icon: '◫' },
@@ -35,7 +33,6 @@ const navItems = [
   { key: 'connections', label: 'Conexões', icon: '🔗' },
   { key: 'videos', label: 'Vídeos', icon: '▶' },
   { key: 'playlists', label: 'Playlists', icon: '≣' },
-  { key: 'schedules', label: 'Agenda', icon: '◷' },
   { key: 'monitor', label: 'Monitoramento', icon: '◌' },
   { key: 'map', label: 'Mapa', icon: '🗺' },
   { key: 'settings', label: 'Configurações', icon: '⚙' },
@@ -50,8 +47,8 @@ function showToast(title, message, type = 'info') {
   toast.innerHTML = `
     <span class="toast-icon">${icons[type]}</span>
     <div class="toast-content">
-      <div class="toast-title">${escapeHtml(title)}</div>
-      <div class="toast-message">${escapeHtml(message)}</div>
+      <div class="toast-title">${title}</div>
+      <div class="toast-message">${message}</div>
     </div>
     <button class="toast-close">✕</button>
   `;
@@ -76,7 +73,7 @@ function showLoading(message = 'Carregando...') {
   overlay.id = 'global-loading';
   overlay.innerHTML = `
     <div class="loading-spinner"></div>
-    <p>${escapeHtml(message)}</p>
+    <p>${message}</p>
   `;
   document.body.appendChild(overlay);
 }
@@ -92,11 +89,10 @@ async function loadData() {
   }
 
   try {
-    const [devicesData, videosData, playlistsData, schedulesData, connectionRequestsData] = await Promise.all([
+    const [devicesData, videosData, playlistsData, connectionRequestsData] = await Promise.all([
       fetchCollection('devices'),
       fetchCollection('videos'),
       fetchCollection('playlists'),
-      fetchCollection('playlistSchedules'),
       fetchCollection('connectionRequests'),
     ]);
 
@@ -105,7 +101,6 @@ async function loadData() {
     state.devices = devicesWithStatus;
     state.videos = videosData;
     state.playlists = playlistsData;
-    state.schedules = schedulesData;
     state.connectionRequests = connectionRequestsData.filter(r => r.status === 'pending');
 
     const onlineCount = devicesWithStatus.filter(d => d.status === 'online').length;
@@ -125,8 +120,6 @@ async function loadData() {
 }
 
 function render() {
-  pendingRealtimeRender = false;
-
   if (state.loading) {
     app.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:100vh;"><div class="loading-spinner"></div></div>';
     return;
@@ -164,7 +157,6 @@ function renderView() {
     connections: () => connectionsView(payload),
     videos: () => videosView(payload),
     playlists: () => playlistsView(payload),
-    schedules: () => schedulesView(payload),
     monitor: () => monitorView(payload),
     map: () => mapView(payload),
     settings: () => settingsView(payload, isDemo),
@@ -178,79 +170,6 @@ function renderView() {
     scheduleMapUpdate();
   }
 }
-
-function serializeFormState(form) {
-  return JSON.stringify(Array.from(form.elements)
-    .filter((field) => field.name && !['button', 'submit', 'reset'].includes(field.type))
-    .map((field) => {
-      if (field.type === 'checkbox' || field.type === 'radio') {
-        return [field.name, field.value, field.checked];
-      }
-
-      if (field.type === 'file') {
-        return [field.name, Array.from(field.files || []).map((file) => `${file.name}:${file.size}`).join(',')];
-      }
-
-      if (field.tagName === 'SELECT' && field.multiple) {
-        return [field.name, Array.from(field.selectedOptions).map((option) => option.value)];
-      }
-
-      return [field.name, field.value];
-    }));
-}
-
-function bindFormEditingGuards() {
-  document.querySelectorAll('form').forEach((form) => {
-    form.dataset.initialFormState = serializeFormState(form);
-    form.dataset.dirty = 'false';
-
-    const updateDirtyState = () => {
-      form.dataset.dirty = serializeFormState(form) === form.dataset.initialFormState ? 'false' : 'true';
-    };
-
-    form.addEventListener('input', updateDirtyState);
-    form.addEventListener('change', updateDirtyState);
-    form.addEventListener('submit', () => {
-      form.dataset.initialFormState = serializeFormState(form);
-      form.dataset.dirty = 'false';
-    });
-    form.addEventListener('reset', () => {
-      setTimeout(() => {
-        form.dataset.initialFormState = serializeFormState(form);
-        form.dataset.dirty = 'false';
-        flushPendingRealtimeRender();
-      }, 0);
-    });
-  });
-}
-
-function isEditingForm() {
-  const activeElement = document.activeElement;
-  const hasActiveFormFocus = activeElement && activeElement.closest('form, .modal-overlay');
-  const hasDirtyForm = document.querySelector('form[data-dirty="true"]');
-  const hasOpenModal = document.querySelector('.modal-overlay');
-  return Boolean(hasActiveFormFocus || hasDirtyForm || hasOpenModal);
-}
-
-function renderFromRealtime() {
-  if (state.route === 'map') return;
-
-  if (isEditingForm()) {
-    pendingRealtimeRender = true;
-    return;
-  }
-
-  render();
-}
-
-function flushPendingRealtimeRender() {
-  if (!pendingRealtimeRender || isEditingForm()) return;
-  render();
-}
-
-document.addEventListener('focusout', () => {
-  setTimeout(flushPendingRealtimeRender, 0);
-});
 
 function getTimestampMillis(value) {
   if (!value) return 0;
@@ -375,11 +294,11 @@ function updateMapMarkers() {
         fillOpacity: 1,
       })
         .addTo(window.mapMarkersLayer)
-      .bindPopup(`
+        .bindPopup(`
           <div style="min-width: 150px;">
-            <strong>${displayText(device.name)}</strong><br/>
-            <span>${displayText(device.car, 'Sem veículo')}</span><br/>
-            <span>${displayText(device.driver, 'Sem motorista')}</span><br/>
+            <strong>${device.name}</strong><br/>
+            <span>${device.car || 'Sem veículo'}</span><br/>
+            <span>${device.driver || 'Sem motorista'}</span><br/>
             <span style="color: ${isOnline ? 'green' : 'gray'}">● ${isOnline ? 'Online' : 'Offline'}</span>
           </div>
         `);
@@ -451,11 +370,9 @@ function bindAppEvents() {
 }
 
 function bindForms() {
-  bindFormEditingGuards();
   bindDeviceForm();
   bindVideoForm();
   bindPlaylistForm();
-  bindScheduleForm();
   bindDeleteButtons();
   bindEditButtons();
   bindFileInput();
@@ -507,15 +424,13 @@ function showDeleteModal(type, id, fileId) {
   const labels = {
     'tablet': 'tablet',
     'vídeo': 'vídeo',
-    'playlist': 'playlist',
-    'agendamento': 'agendamento'
+    'playlist': 'playlist'
   };
   
   const icons = {
     'tablet': '▣',
     'vídeo': '▶',
-    'playlist': '≣',
-    'agendamento': '◷'
+    'playlist': '≣'
   };
   
   const modal = document.createElement('div');
@@ -554,7 +469,6 @@ async function performDelete(type, id, fileId) {
         'tablet': 'devices',
         'vídeo': 'videos',
         'playlist': 'playlists',
-        'agendamento': 'playlistSchedules',
       };
       await deleteDocument(collectionMap[type], id);
     }
@@ -589,15 +503,15 @@ function showEditDeviceModal(deviceId) {
       <form id="edit-device-form">
         <div class="form-group">
           <label>Nome</label>
-          <input class="input" name="name" value="${escapeHtml(device.name || '')}" required />
+          <input class="input" name="name" value="${device.name || ''}" required />
         </div>
         <div class="form-group">
           <label>Veículo</label>
-          <input class="input" name="car" value="${escapeHtml(device.car || '')}" />
+          <input class="input" name="car" value="${device.car || ''}" />
         </div>
         <div class="form-group">
           <label>Motorista</label>
-          <input class="input" name="driver" value="${escapeHtml(device.driver || '')}" />
+          <input class="input" name="driver" value="${device.driver || ''}" />
         </div>
         <div class="modal-actions">
           <button class="button secondary" type="button" id="modal-cancel">Cancelar</button>
@@ -645,7 +559,7 @@ function showEditPlaylistModal(playlistId) {
       <label class="checkbox-item">
         <input type="checkbox" name="videos" value="${video.id}" ${isChecked} />
         <span class="checkbox-box">✓</span>
-        <span class="checkbox-label">${displayText(video.title)}</span>
+        <span class="checkbox-label">${video.title}</span>
       </label>
     `;
   }).join('');
@@ -656,7 +570,7 @@ function showEditPlaylistModal(playlistId) {
       <label class="checkbox-item">
         <input type="checkbox" name="devices" value="${device.id}" ${isChecked} />
         <span class="checkbox-box">✓</span>
-        <span class="checkbox-label">${displayText(device.name)}</span>
+        <span class="checkbox-label">${device.name}</span>
       </label>
     `;
   }).join('');
@@ -670,7 +584,7 @@ function showEditPlaylistModal(playlistId) {
       <form id="edit-playlist-form">
         <div class="form-group">
           <label>Nome</label>
-          <input class="input" name="name" value="${escapeHtml(playlist.name || '')}" required />
+          <input class="input" name="name" value="${playlist.name || ''}" required />
         </div>
         <div class="form-group">
           <label>Vídeos</label>
@@ -720,7 +634,9 @@ function showEditPlaylistModal(playlistId) {
     try {
       if (hasFirebaseConfig) {
         await updatePlaylist(playlistId, payload);
-        await syncPlaylistAssignments(playlistId, selectedDeviceIds);
+        for (const devId of selectedDeviceIds) {
+          await assignPlaylistToDevice(devId, playlistId);
+        }
       }
       modal.remove();
       await loadData();
@@ -785,19 +701,19 @@ function showConnectDeviceModal(deviceId) {
     <div class="modal">
       <span class="modal-icon info">🔗</span>
       <h3>Conectar Tablet</h3>
-      <p>Configure o dispositivo: <strong>${displayText(deviceId)}</strong></p>
+      <p>Configure o dispositivo: <strong>${deviceId}</strong></p>
       <form id="connect-device-form">
         <div class="form-group">
           <label>Nome do Tablet</label>
-          <input class="input" name="name" value="${escapeHtml(existingDevice?.name || '')}" placeholder="Tablet Corolla 01" required />
+          <input class="input" name="name" value="${existingDevice?.name || ''}" placeholder="Tablet Corolla 01" required />
         </div>
         <div class="form-group">
           <label>Veículo</label>
-          <input class="input" name="car" value="${escapeHtml(existingDevice?.car || '')}" placeholder="Toyota Corolla" />
+          <input class="input" name="car" value="${existingDevice?.car || ''}" placeholder="Toyota Corolla" />
         </div>
         <div class="form-group">
           <label>Motorista</label>
-          <input class="input" name="driver" value="${escapeHtml(existingDevice?.driver || '')}" placeholder="João Silva" />
+          <input class="input" name="driver" value="${existingDevice?.driver || ''}" placeholder="João Silva" />
         </div>
         <div class="modal-actions">
           <button class="button secondary" type="button" id="modal-cancel">Cancelar</button>
@@ -926,7 +842,9 @@ function bindPlaylistForm() {
       
       if (hasFirebaseConfig) {
         const playlistId = await addPlaylist(payload);
-        await syncPlaylistAssignments(playlistId, selectedDeviceIds);
+        for (const deviceId of selectedDeviceIds) {
+          await assignPlaylistToDevice(deviceId, playlistId);
+        }
       }
       
       hideLoading();
@@ -937,64 +855,6 @@ function bindPlaylistForm() {
     } catch (error) {
       hideLoading();
       showToast('Erro', error.message || 'Não foi possível salvar a playlist.', 'error');
-    }
-  });
-}
-
-function bindScheduleForm() {
-  const form = document.querySelector('#schedule-form');
-  if (!form) return;
-
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const formData = new FormData(form);
-    const selectedDeviceIds = Array.from(form.querySelectorAll('input[name="devices"]:checked')).map(cb => cb.value);
-    const selectedDays = Array.from(form.querySelectorAll('input[name="daysOfWeek"]:checked')).map(cb => Number(cb.value));
-    const playlistId = String(formData.get('playlistId') || '').trim();
-    const startsAtValue = String(formData.get('startsAt') || '');
-    const endsAtValue = String(formData.get('endsAt') || '');
-
-    if (!playlistId || selectedDeviceIds.length === 0 || !startsAtValue || !endsAtValue) {
-      showToast('Agenda incompleta', 'Escolha playlist, tablets, início e fim.', 'warning');
-      return;
-    }
-
-    const startsAt = new Date(startsAtValue).getTime();
-    const endsAt = new Date(endsAtValue).getTime();
-    if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt) || endsAt <= startsAt) {
-      showToast('Período inválido', 'A data final precisa ser maior que a inicial.', 'warning');
-      return;
-    }
-
-    const playlist = state.playlists.find(item => item.id === playlistId);
-    const payload = {
-      name: String(formData.get('name') || '').trim() || playlist?.name || 'Agendamento',
-      playlistId,
-      playlistName: playlist?.name || '',
-      deviceIds: selectedDeviceIds,
-      startsAt,
-      endsAt,
-      daysOfWeek: selectedDays,
-      startTime: String(formData.get('startTime') || '').trim(),
-      endTime: String(formData.get('endTime') || '').trim(),
-      priority: Number(formData.get('priority') || 0),
-      active: formData.get('active') === 'on',
-    };
-
-    try {
-      showLoading('Salvando agendamento...');
-      if (hasFirebaseConfig) {
-        await addPlaylistSchedule(payload);
-      }
-      hideLoading();
-      await loadData();
-      showToast('Agendamento salvo', 'A playlist será aplicada no período definido.', 'success');
-      form.reset();
-      render();
-    } catch (error) {
-      hideLoading();
-      console.error('Erro ao salvar agendamento:', error);
-      showToast('Erro', error.message || 'Não foi possível salvar o agendamento.', 'error');
     }
   });
 }
@@ -1019,30 +879,30 @@ function setupRealtimeListeners() {
     };
 
     updateDeviceStatusUI(devicesWithStatus);
-    renderFromRealtime();
+    if (state.route !== 'map') {
+      render();
+    }
   });
 
   const unsubPlaylists = subscribeToPlaylists((playlistsData) => {
     state.playlists = playlistsData;
-    renderFromRealtime();
+    if (state.route !== 'map') {
+      render();
+    }
   });
 
   const unsubConnectionRequests = subscribeToConnectionRequests((requests) => {
     const pendingRequests = requests.filter(r => r.status === 'pending');
     state.connectionRequests = pendingRequests;
-    renderFromRealtime();
-  });
-
-  const unsubSchedules = subscribeToPlaylistSchedules((schedules) => {
-    state.schedules = schedules;
-    renderFromRealtime();
+    if (state.route !== 'map') {
+      render();
+    }
   });
 
   state.unsubscribe = () => {
     unsubDevices();
     unsubPlaylists();
     unsubConnectionRequests();
-    unsubSchedules();
   };
 }
 
@@ -1104,18 +964,8 @@ function bindExportButton() {
   if (!exportBtn) return;
   
   exportBtn.addEventListener('click', () => {
-    showLoading('Preparando relatório...');
-    import('./export-excel.js')
-      .then(({ exportToExcel }) => {
     exportToExcel(state, 'relatorio-sponsorgo');
-        hideLoading();
     showToast('Relatório Exportado', 'O arquivo Excel foi baixado com sucesso.', 'success');
-      })
-      .catch((error) => {
-        hideLoading();
-        console.error('Erro ao exportar relatório:', error);
-        showToast('Erro', 'Não foi possível exportar o relatório.', 'error');
-      });
   });
 }
 

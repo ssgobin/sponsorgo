@@ -1,5 +1,5 @@
 import { layoutView } from './templates.js';
-import { displayText, escapeHtml } from './dom.js';
+import { exportToExcel } from './export-excel.js';
 
 function formatDate(timestamp) {
   if (!timestamp) return '—';
@@ -81,10 +81,10 @@ export function dashboardView(data) {
       : null;
     return `
     <tr data-device-id="${device.id}">
-      <td><strong>${displayText(device.name)}</strong><div class="card-subtitle">${displayText(device.id)}</div></td>
-      <td>${displayText(device.car)}</td>
+      <td><strong>${device.name || '—'}</strong><div class="card-subtitle">${device.id || '—'}</div></td>
+      <td>${device.car || '—'}</td>
       <td><span class="status ${device.status || 'offline'}">${formatDeviceStatus(device.status)}</span></td>
-      <td>${displayText(getVideoTitle(device.currentVideoId) || device.currentVideo)}</td>
+      <td>${getVideoTitle(device.currentVideoId) || device.currentVideo || '—'}</td>
       <td>${formatDate(lastContact) || '—'}</td>
       <td>${device.battery >= 0 ? `${device.battery}%` : '—'}</td>
       <td style="width:80px;">
@@ -97,10 +97,10 @@ export function dashboardView(data) {
   const activities = activity.length > 0 ? activity.map((item) => `
     <div class="list-item">
       <div>
-        <p class="list-item-title">${displayText(item.title)}</p>
-        <p class="list-item-subtitle">${displayText(item.detail)}</p>
+        <p class="list-item-title">${item.title || '—'}</p>
+        <p class="list-item-subtitle">${item.detail || '—'}</p>
       </div>
-      <span class="pill">${displayText(item.when)}</span>
+      <span class="pill">${item.when || '—'}</span>
     </div>
   `).join('') : '<div class="empty-state"><h3>Nenhuma atividade recente</h3><p>As atividades vão aparecer aqui quando os tablets interagirem.</p></div>';
 
@@ -166,8 +166,8 @@ export function devicesView(data) {
   const items = data.devices.length > 0 ? data.devices.map((device) => `
     <div class="list-item" data-device-id="${device.id}">
       <div>
-        <p class="list-item-title">${displayText(device.name)}</p>
-        <p class="list-item-subtitle">${displayText(device.id)} • ${displayText(device.car, 'Sem veículo')} • ${displayText(device.driver, 'Sem motorista')}</p>
+        <p class="list-item-title">${device.name || '—'}</p>
+        <p class="list-item-subtitle">${device.id || '—'} • ${device.car || 'Sem veículo'} • ${device.driver || 'Sem motorista'}</p>
       </div>
       <div class="row wrap" style="align-items:center;gap:8px;">
         <span class="status ${device.status || 'offline'}">${formatDeviceStatus(device.status)}</span>
@@ -238,8 +238,8 @@ export function videosView(data) {
   const items = data.videos.length > 0 ? data.videos.map((video) => `
     <div class="list-item">
       <div>
-        <p class="list-item-title">${displayText(video.title)}</p>
-        <p class="list-item-subtitle">${displayText(video.fileName, 'arquivo.mp4')} • ${displayText(video.duration, '00:00')} • ${displayText(video.size)}</p>
+        <p class="list-item-title">${video.title || '—'}</p>
+        <p class="list-item-subtitle">${video.fileName || 'arquivo.mp4'} • ${video.duration || '00:00'} • ${video.size || '—'}</p>
       </div>
       <div class="row wrap" style="align-items:center;gap:8px;">
         <span class="pill ${video.status === 'Ativo' || video.status === 'active' ? 'active' : ''}">${video.status || 'Rascunho'}</span>
@@ -314,10 +314,13 @@ export function videosView(data) {
 }
 
 export function playlistsView(data) {
+  const videoOptions = data.videos.map((video) => `<option value="${video.id || video.title}">${video.title}</option>`).join('');
+  const deviceOptions = data.devices.map((device) => `<option value="${device.id || device.name}">${device.name}</option>`).join('');
+  
   const items = data.playlists.length > 0 ? data.playlists.map((playlist) => `
     <div class="list-item">
       <div>
-        <p class="list-item-title">${displayText(playlist.name)}</p>
+        <p class="list-item-title">${playlist.name || '—'}</p>
         <p class="list-item-subtitle">${playlist.videos?.length || playlist.videos || 0} vídeos • ${playlist.devices?.length || playlist.devices || 0} tablets • ${formatDate(playlist.updatedAt)}</p>
       </div>
       <div class="row wrap" style="align-items:center;gap:8px;">
@@ -350,9 +353,9 @@ export function playlistsView(data) {
               <div class="checkbox-list">
                 ${data.videos.length > 0 ? data.videos.map((video) => `
                   <label class="checkbox-item">
-                    <input type="checkbox" name="videos" value="${escapeHtml(video.id || video.title)}" />
+                    <input type="checkbox" name="videos" value="${video.id || video.title}" />
                     <span class="checkbox-box">✓</span>
-                    <span class="checkbox-label">${displayText(video.title)}</span>
+                    <span class="checkbox-label">${video.title}</span>
                   </label>
                 `).join('') : '<p class="text-muted">Nenhum vídeo disponível</p>'}
               </div>
@@ -362,9 +365,9 @@ export function playlistsView(data) {
               <div class="checkbox-list">
                 ${data.devices.length > 0 ? data.devices.map((device) => `
                   <label class="checkbox-item">
-                    <input type="checkbox" name="devices" value="${escapeHtml(device.id || device.name)}" />
+                    <input type="checkbox" name="devices" value="${device.id || device.name}" />
                     <span class="checkbox-box">✓</span>
-                    <span class="checkbox-label">${displayText(device.name)}</span>
+                    <span class="checkbox-label">${device.name}</span>
                   </label>
                 `).join('') : '<p class="text-muted">Nenhum tablet disponível</p>'}
               </div>
@@ -394,165 +397,6 @@ export function playlistsView(data) {
   );
 }
 
-function formatScheduleDate(value) {
-  if (!value) return '—';
-  const millis = typeof value === 'number' ? value : (value.toDate ? value.toDate().getTime() : Number(value));
-  if (!Number.isFinite(millis)) return '—';
-  return new Date(millis).toLocaleString('pt-BR');
-}
-
-function formatScheduleDays(days = []) {
-  if (!Array.isArray(days) || days.length === 0) return 'Todos os dias';
-  const labels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-  return days.map(day => labels[Number(day)]).filter(Boolean).join(', ') || 'Todos os dias';
-}
-
-export function schedulesView(data) {
-  const playlists = data.playlists || [];
-  const devices = data.devices || [];
-  const schedules = data.schedules || [];
-
-  const playlistOptions = playlists.map((playlist) => `
-    <option value="${escapeHtml(playlist.id)}">${displayText(playlist.name)}</option>
-  `).join('');
-
-  const deviceItems = devices.map((device) => `
-    <label class="checkbox-item">
-      <input type="checkbox" name="devices" value="${escapeHtml(device.id)}" />
-      <span class="checkbox-box">✓</span>
-      <span class="checkbox-label">${displayText(device.name || device.id)}</span>
-    </label>
-  `).join('');
-
-  const dayItems = [
-    ['0', 'Dom'], ['1', 'Seg'], ['2', 'Ter'], ['3', 'Qua'],
-    ['4', 'Qui'], ['5', 'Sex'], ['6', 'Sáb'],
-  ].map(([value, label]) => `
-    <label class="day-pill">
-      <input type="checkbox" name="daysOfWeek" value="${value}" />
-      <span>${label}</span>
-    </label>
-  `).join('');
-
-  const items = schedules.length > 0 ? schedules.map((schedule) => {
-    const playlist = playlists.find((item) => item.id === schedule.playlistId);
-    const deviceNames = (schedule.deviceIds || [])
-      .map((id) => devices.find((device) => device.id === id)?.name || id)
-      .join(', ');
-    const timeWindow = schedule.startTime && schedule.endTime
-      ? ` • ${displayText(schedule.startTime)}-${displayText(schedule.endTime)}`
-      : '';
-
-    return `
-      <div class="list-item">
-        <div>
-          <p class="list-item-title">${displayText(schedule.name || playlist?.name || 'Agendamento')}</p>
-          <p class="list-item-subtitle">
-            ${displayText(playlist?.name || schedule.playlistName || schedule.playlistId)}
-            • ${displayText(deviceNames, 'Sem tablets')}
-          </p>
-          <p class="list-item-subtitle">
-            ${formatScheduleDate(schedule.startsAt)} até ${formatScheduleDate(schedule.endsAt)}
-            • ${formatScheduleDays(schedule.daysOfWeek)}${timeWindow}
-          </p>
-        </div>
-        <div class="row wrap" style="align-items:center;gap:8px;">
-          <span class="pill ${schedule.active !== false ? 'active' : ''}">${schedule.active !== false ? 'Ativo' : 'Inativo'}</span>
-          <span class="pill">Prioridade ${Number(schedule.priority || 0)}</span>
-          <button class="button-delete" data-delete="agendamento" data-id="${escapeHtml(schedule.id)}" title="Excluir">✕</button>
-        </div>
-      </div>
-    `;
-  }).join('') : '';
-
-  return layoutView(
-    'Agenda',
-    'Defina quando uma playlist deve tocar em cada tablet.',
-    `
-      <section class="grid-2">
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <h3 class="card-title">Novo Agendamento</h3>
-              <p class="card-subtitle">A agenda tem prioridade sobre a playlist padrão</p>
-            </div>
-          </div>
-          <form id="schedule-form" class="list">
-            <div class="form-row">
-              <div class="form-group">
-                <label>Nome</label>
-                <input class="input" name="name" placeholder="Campanha manhã" />
-              </div>
-              <div class="form-group">
-                <label>Playlist</label>
-                <select class="select" name="playlistId" required>
-                  <option value="">Selecione</option>
-                  ${playlistOptions}
-                </select>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>Início</label>
-                <input class="input" name="startsAt" type="datetime-local" required />
-              </div>
-              <div class="form-group">
-                <label>Fim</label>
-                <input class="input" name="endsAt" type="datetime-local" required />
-              </div>
-            </div>
-            <div class="form-row three">
-              <div class="form-group">
-                <label>Hora inicial diária</label>
-                <input class="input" name="startTime" type="time" />
-              </div>
-              <div class="form-group">
-                <label>Hora final diária</label>
-                <input class="input" name="endTime" type="time" />
-              </div>
-              <div class="form-group">
-                <label>Prioridade</label>
-                <input class="input" name="priority" type="number" value="0" min="0" max="999" />
-              </div>
-            </div>
-            <div class="form-group">
-              <label>Dias da semana</label>
-              <div class="checkbox-list schedule-days">${dayItems}</div>
-            </div>
-            <div class="form-group">
-              <label>Tablets</label>
-              <div class="checkbox-list">
-                ${deviceItems || '<p class="text-muted">Nenhum tablet disponível</p>'}
-              </div>
-            </div>
-            <label class="checkbox-item">
-              <input type="checkbox" name="active" checked />
-              <span class="checkbox-box">✓</span>
-              <span class="checkbox-label">Agendamento ativo</span>
-            </label>
-            <button class="button primary" type="submit">Salvar Agendamento</button>
-          </form>
-        </article>
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <h3 class="card-title">Agendamentos</h3>
-              <p class="card-subtitle">Maior prioridade vence em caso de conflito</p>
-            </div>
-          </div>
-          ${items ? `<div class="list">${items}</div>` : `
-            <div class="empty-state">
-              <h3>Nenhum agendamento</h3>
-              <p>Crie uma janela de reprodução ao lado.</p>
-            </div>
-          `}
-        </article>
-      </section>
-    `,
-    '<button class="button ghost" data-action="logout">Sair</button>'
-  );
-}
-
 export function monitorView(data) {
   const getVideoTitle = (videoId) => {
     if (!videoId) return '—';
@@ -566,9 +410,9 @@ export function monitorView(data) {
       : null;
     return `
     <tr data-device-id="${device.id}">
-      <td><strong>${displayText(device.name)}</strong></td>
+      <td><strong>${device.name || '—'}</strong></td>
       <td><span class="status ${device.status || 'offline'}">${formatDeviceStatus(device.status)}</span></td>
-      <td>${displayText(getVideoTitle(device.currentVideoId) || device.currentVideo)}</td>
+      <td>${getVideoTitle(device.currentVideoId) || device.currentVideo || '—'}</td>
       <td>${formatDate(lastContact) || '—'}</td>
       <td>${device.battery >= 0 ? `${device.battery}%` : '—'}</td>
       <td style="width:50px;"><button class="button-edit" data-edit="tablet" data-id="${device.id}" title="Editar">✎</button></td>
@@ -680,6 +524,12 @@ export function mapView(data) {
 }
 
 export function settingsView(data, isDemo) {
+  const { metrics, devices, videos, playlists } = data || {};
+  
+  const handleExport = () => {
+    exportToExcel({ metrics, devices, videos, playlists }, 'relatorio-sponsorgo');
+  };
+
   return layoutView(
     'Configurações',
     'Configure e personalize o sistema.',
@@ -753,14 +603,14 @@ export function connectionsView(data) {
   const deviceRows = pendingRequests.map((request) => {
     const existingDevice = devices.find(d => d.id === request.deviceId);
     return `
-      <div class="connection-card">
+      <div class="connection-card" style="background: #1a1a2e; padding: 16px; margin-bottom: 12px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #333;">
         <div>
-          <h4>${displayText(request.deviceId)}</h4>
-          <p>
+          <h4 style="margin: 0 0 8px; color: #00ff00;">${request.deviceId}</h4>
+          <p style="margin: 0; color: #aaa; font-size: 13px;">
             Solicitado: ${formatDate(request.createdAt)}
           </p>
         </div>
-        <button class="button primary" data-connect="${escapeHtml(request.deviceId)}" ${existingDevice && existingDevice.name ? 'disabled' : ''}>
+        <button class="button primary" data-connect="${request.deviceId}" ${existingDevice && existingDevice.name ? 'disabled' : ''}>
           ${existingDevice && existingDevice.name ? 'Já conectado' : 'Conectar'}
         </button>
       </div>
@@ -772,8 +622,8 @@ export function connectionsView(data) {
   const connectedRows = connectedDevices.map(device => `
     <div class="list-item" data-device-id="${device.id}">
       <div>
-        <p class="list-item-title">${displayText(device.name)}</p>
-        <p class="list-item-subtitle">${displayText(device.id)} • ${displayText(device.car, 'Sem veículo')} • ${displayText(device.driver, 'Sem motorista')}</p>
+        <p class="list-item-title">${device.name || '—'}</p>
+        <p class="list-item-subtitle">${device.id} • ${device.car || 'Sem veículo'} • ${device.driver || 'Sem motorista'}</p>
       </div>
       <span class="pill active">Conectado</span>
     </div>
@@ -797,7 +647,7 @@ export function connectionsView(data) {
           <div class="card-header">
             <div>
               <h3 class="card-title">Tablets Conectados</h3>
-              <p class="card-subtitle">Já aprovados</p>
+              <p class="card-subtitle">Já approvedos</p>
             </div>
           </div>
           ${connectedDevices.length > 0 ? connectedRows : '<p class="text-muted">Nenhum tablet conectado</p>'}
