@@ -25,8 +25,6 @@ const state = {
   unsubscribe: null,
 };
 
-const ONLINE_THRESHOLD = 2 * 60 * 1000;
-
 const navItems = [
   { key: 'dashboard', label: 'Visão Geral', icon: '◫' },
   { key: 'devices', label: 'Tablets', icon: '▣' },
@@ -96,7 +94,20 @@ async function loadData() {
       fetchCollection('connectionRequests'),
     ]);
 
-    const devicesWithStatus = devicesData.map(getDeviceWithComputedStatus);
+    const now = Date.now();
+    const ONLINE_THRESHOLD = 2 * 60 * 1000;
+
+    const devicesWithStatus = devicesData.map(d => {
+      const lastHeartbeat = d.lastHeartbeat;
+      let computedStatus = 'offline';
+      
+      if (lastHeartbeat) {
+        const timestamp = lastHeartbeat.toDate ? lastHeartbeat.toDate().getTime() : (typeof lastHeartbeat === 'number' ? lastHeartbeat : 0);
+        computedStatus = (now - timestamp < ONLINE_THRESHOLD) ? 'online' : 'offline';
+      }
+      
+      return { ...d, status: computedStatus };
+    });
 
     state.devices = devicesWithStatus;
     state.videos = videosData;
@@ -152,74 +163,30 @@ function renderView() {
   const payload = { ...state, isDemo };
 
   const views = {
-    dashboard: () => dashboardView(payload),
-    devices: () => devicesView(payload),
-    connections: () => connectionsView(payload),
-    videos: () => videosView(payload),
-    playlists: () => playlistsView(payload),
-    monitor: () => monitorView(payload),
-    map: () => mapView(payload),
-    settings: () => settingsView(payload, isDemo),
+    dashboard: dashboardView(payload),
+    devices: devicesView(payload),
+    connections: connectionsView(payload),
+    videos: videosView(payload),
+    playlists: playlistsView(payload),
+    monitor: monitorView(payload),
+    map: mapView(payload),
+    settings: settingsView(payload, isDemo),
   };
 
-  view.innerHTML = (views[state.route] || views.dashboard)();
+  view.innerHTML = views[state.route] || views.dashboard;
   bindForms();
   
   if (state.route === 'map') {
-    window.mapDevicesData = getMapDevicesData(state.devices);
-    scheduleMapUpdate();
+    console.log('renderView - route is map, scheduling initMap');
+    setTimeout(initMap, 500);
   }
 }
 
-function getTimestampMillis(value) {
-  if (!value) return 0;
-  if (value.toDate) return value.toDate().getTime();
-  if (typeof value === 'number') return value;
-  return 0;
-}
-
-function getDeviceWithComputedStatus(device) {
-  const now = Date.now();
-  const lastHeartbeatTime = getTimestampMillis(device.lastHeartbeat);
-  const isExplicitlyOffline = device.status === 'offline';
-  const computedStatus = !isExplicitlyOffline && lastHeartbeatTime && (now - lastHeartbeatTime < ONLINE_THRESHOLD)
-    ? 'online'
-    : 'offline';
-
-  return { ...device, status: computedStatus };
-}
-
 const DEFAULT_CENTER = [-22.7391, -47.3304];
-let mapUpdateScheduled = false;
-
-function getMapDevicesData(devices) {
-  return devices
-    .filter((d) => d.location && d.location.latitude != null && d.location.longitude != null)
-    .map((d) => ({
-      id: d.id,
-      name: d.name || d.id,
-      car: d.car || '',
-      driver: d.driver || '',
-      status: d.status || 'offline',
-      lat: d.location.latitude,
-      lng: d.location.longitude,
-      accuracy: d.location.accuracy || 0,
-      lastUpdate: d.location.timestamp ? new Date(d.location.timestamp).toLocaleString('pt-BR') : '—'
-    }));
-}
-
-function scheduleMapUpdate() {
-  if (mapUpdateScheduled) return;
-  mapUpdateScheduled = true;
-
-  requestAnimationFrame(() => {
-    mapUpdateScheduled = false;
-    initMap();
-  });
-}
 
 function initMap() {
   const mapElement = document.getElementById('map');
+  console.log('initMap - element:', !!mapElement, 'L:', !!window.L, 'map:', !!window.map, 'layer:', !!window.mapMarkersLayer);
   
   if (!mapElement) return;
   
@@ -231,18 +198,19 @@ function initMap() {
   if (window.map && window.mapMarkersLayer) {
     const mapContainer = window.map.getContainer?.();
     if (mapContainer === mapElement) {
+      console.log('Map valid, just invalidating');
       window.map.invalidateSize?.();
       updateMapMarkers();
       return;
     } else {
-      window.map.remove?.();
+      console.log('Map container changed, recreating');
       window.map = null;
       window.mapMarkersLayer = null;
-      window.mapHasFittedBounds = false;
     }
   }
   
   try {
+    console.log('Creating new map');
     const map = window.L.map('map', { preferCanvas: true });
     map.setView(DEFAULT_CENTER, 13);
     
@@ -252,8 +220,8 @@ function initMap() {
     
     window.mapMarkersLayer = window.L.layerGroup().addTo(map);
     window.map = map;
-    window.mapHasFittedBounds = false;
     
+    console.log('Map created');
     updateMapMarkers();
   } catch (err) {
     console.error('Error:', err);
@@ -261,7 +229,14 @@ function initMap() {
 }
 
 function updateMapMarkers() {
+  console.log('updateMapMarkers called', { 
+    map: !!window.map, 
+    layer: !!window.mapMarkersLayer,
+    data: window.mapDevicesData?.length
+  });
+  
   if (!window.map || !window.mapMarkersLayer) {
+    console.log('No map or layer, skipping');
     return;
   }
   
@@ -274,9 +249,8 @@ function updateMapMarkers() {
   const devices = window.mapDevicesData || [];
   
   if (devices.length === 0) {
-    if (!window.mapHasFittedBounds) {
-      window.map.setView(DEFAULT_CENTER, 13);
-    }
+    console.log('No device data');
+    window.map.setView(DEFAULT_CENTER, 13);
     return;
   }
   
@@ -285,14 +259,25 @@ function updateMapMarkers() {
   devices.forEach((device) => {
     if (device.lat != null && device.lng != null) {
       const isOnline = device.status === 'online';
-      const marker = window.L.circleMarker([device.lat, device.lng], {
-        renderer: window.map.options.renderer,
-        radius: 9,
-        color: '#ffffff',
-        weight: 3,
-        fillColor: isOnline ? '#4CAF50' : '#9E9E9E',
-        fillOpacity: 1,
-      })
+      const icon = window.L.divIcon({
+        className: 'custom-marker',
+        html: `<div style="
+          background: ${isOnline ? '#4CAF50' : '#9E9E9E'};
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          border: 3px solid white;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 16px;
+        ">🚗</div>`,
+        iconSize: [32, 32],
+        iconAnchor: [16, 16]
+      });
+      
+      const marker = window.L.marker([device.lat, device.lng], { icon })
         .addTo(window.mapMarkersLayer)
         .bindPopup(`
           <div style="min-width: 150px;">
@@ -307,16 +292,15 @@ function updateMapMarkers() {
     }
   });
   
-  if (!window.mapHasFittedBounds) {
-    if (bounds.length > 1) {
-      window.map.fitBounds(bounds, { padding: [50, 50] });
-    } else if (bounds.length === 1) {
-      window.map.setView(bounds[0], 15);
-    } else {
-      window.map.setView(DEFAULT_CENTER, 13);
-    }
-    window.mapHasFittedBounds = true;
+  if (bounds.length > 1) {
+    window.map.fitBounds(bounds, { padding: [50, 50] });
+  } else if (bounds.length === 1) {
+    window.map.setView(bounds[0], 15);
+  } else {
+    window.map.setView(DEFAULT_CENTER, 13);
   }
+  
+  console.log('Markers updated:', bounds.length);
 }
 
 function bindLogin() {
@@ -865,7 +849,20 @@ function setupRealtimeListeners() {
   }
 
   const unsubDevices = subscribeToDevices((devicesData) => {
-    const devicesWithStatus = devicesData.map(getDeviceWithComputedStatus);
+    const now = Date.now();
+    const ONLINE_THRESHOLD = 2 * 60 * 1000;
+
+    const devicesWithStatus = devicesData.map(d => {
+      const lastHeartbeat = d.lastHeartbeat;
+      let computedStatus = 'offline';
+
+      if (lastHeartbeat) {
+        const timestamp = lastHeartbeat.toDate ? lastHeartbeat.toDate().getTime() : (typeof lastHeartbeat === 'number' ? lastHeartbeat : 0);
+        computedStatus = (now - timestamp < ONLINE_THRESHOLD) ? 'online' : 'offline';
+      }
+
+      return { ...d, status: computedStatus };
+    });
 
     state.devices = devicesWithStatus;
 
@@ -879,24 +876,18 @@ function setupRealtimeListeners() {
     };
 
     updateDeviceStatusUI(devicesWithStatus);
-    if (state.route !== 'map') {
-      render();
-    }
+    render();
   });
 
   const unsubPlaylists = subscribeToPlaylists((playlistsData) => {
     state.playlists = playlistsData;
-    if (state.route !== 'map') {
-      render();
-    }
+    render();
   });
 
   const unsubConnectionRequests = subscribeToConnectionRequests((requests) => {
     const pendingRequests = requests.filter(r => r.status === 'pending');
     state.connectionRequests = pendingRequests;
-    if (state.route !== 'map') {
-      render();
-    }
+    render();
   });
 
   state.unsubscribe = () => {
@@ -911,14 +902,20 @@ function updateDeviceStatusUI(devices) {
   if (!view) return;
 
   if (state.route === 'map') {
-    window.mapDevicesData = getMapDevicesData(devices);
-    updateMetricsCards(view, {
-      onlineDevices: window.mapDevicesData.filter((d) => d.status === 'online').length,
-      offlineDevices: window.mapDevicesData.filter((d) => d.status === 'offline').length,
-      totalOnMap: window.mapDevicesData.length,
-    });
+    window.mapDevicesData = devices.filter(d => d.location && d.location.latitude != null && d.location.longitude != null).map(d => ({
+      id: d.id,
+      name: d.name || d.id,
+      car: d.car || '',
+      driver: d.driver || '',
+      status: d.status || 'offline',
+      lat: d.location.latitude,
+      lng: d.location.longitude,
+      accuracy: d.location.accuracy || 0,
+      lastUpdate: d.location.timestamp ? new Date(d.location.timestamp).toLocaleString('pt-BR') : '—'
+    }));
     
-    scheduleMapUpdate();
+    console.log('updateDeviceStatusUI - map data updated, scheduling initMap');
+    setTimeout(initMap, 500);
     return;
   }
 
@@ -953,8 +950,6 @@ function updateMetricsCards(view, metrics) {
       value.textContent = metrics.onlineDevices;
     } else if (text.includes('Parado') || text.includes('Offline') || text.includes('Inativo')) {
       value.textContent = metrics.offlineDevices;
-    } else if (text.includes('Total no Mapa') && metrics.totalOnMap != null) {
-      value.textContent = metrics.totalOnMap;
     }
   });
 }
