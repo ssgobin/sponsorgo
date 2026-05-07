@@ -1,5 +1,6 @@
 import { layoutView } from './templates.js';
 import { exportToExcel } from './export-excel.js';
+import { DAILY_GOAL_HOURS } from './firebase-hours.js';
 
 function formatDate(timestamp) {
   if (!timestamp) return '—';
@@ -606,6 +607,188 @@ export function settingsView(data, isDemo) {
             </div>
           </div>
         </article>
+      </section>
+    `,
+    '<button class="button ghost" data-action="logout">Sair</button>'
+  );
+}
+
+export function hoursView(data) {
+  const { devices, hoursData, alerts } = data;
+  const today = new Date().toISOString().split('T')[0];
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth() + 1;
+  const currentDay = String(new Date().getDate()).padStart(2, '0');
+  
+  const formatHours = (seconds) => {
+    const hours = Math.floor((seconds || 0) / 3600);
+    return hours.toFixed(1);
+  };
+  
+  const formatPercentage = (driving, propaganda) => {
+    if (!driving || driving === 0) return '0';
+    return (((propaganda || 0) / driving) * 100).toFixed(1);
+  };
+
+  const totalDrivingHours = hoursData.reduce((acc, h) => acc + (h.drivingSeconds || 0), 0);
+  const totalPropagandaHours = hoursData.reduce((acc, h) => acc + (h.propagandaSeconds || 0), 0);
+  
+  const onlineDevices = devices.filter(d => d.status === 'online').length;
+  const devicesBelowGoal = alerts?.length || 0;
+
+  const hourRows = hoursData.map((record) => {
+    const device = devices.find(d => d.id === record.deviceId);
+    const driving = record.drivingSeconds || 0;
+    const propaganda = record.propagandaSeconds || 0;
+    const percentage = formatPercentage(driving, propaganda);
+    const isGoalMet = (driving / 3600) >= DAILY_GOAL_HOURS;
+    
+    return `
+    <tr>
+      <td>${record.date || '—'}</td>
+      <td><strong>${device?.name || record.deviceId || '—'}</strong></td>
+      <td>${device?.car || '—'}</td>
+      <td>${device?.driver || '—'}</td>
+      <td class="hours-cell">${formatHours(driving)}h</td>
+      <td class="hours-cell">${formatHours(propaganda)}h</td>
+      <td class="percentage-cell">${percentage}%</td>
+      <td><span class="status ${isGoalMet ? 'online' : 'offline'}">${isGoalMet ? 'Meta atingida' : 'Abaixo da meta'}</span></td>
+    </tr>
+  `}).join('');
+
+  const alertRows = alerts?.map((alert) => `
+    <div class="alert-item ${alert.dismissed ? 'dismissed' : ''}">
+      <div class="alert-content">
+        <span class="alert-icon">⚠</span>
+        <div class="alert-text">
+          <strong>${alert.driver || 'Motorista'}</strong> não rodou ${alert.difference?.toFixed(1) || '0'} horas
+          <span class="alert-detail">(Meta: ${DAILY_GOAL_HOURS}h, Rodou: ${alert.drivingHours?.toFixed(1) || '0'}h)</span>
+        </div>
+      </div>
+      <button class="button small" data-dismiss-alert="${alert.id}">Dispensar</button>
+    </div>
+  `).join('') || '<p class="text-muted">Nenhum alerta pendente</p>';
+
+  return layoutView(
+    'Relatório de Horas',
+    'Acompanhe as horas de rodagem e propaganda dos veículos.',
+    `
+      <section class="grid-4">
+        <article class="card">
+          <div class="metric">
+            <span class="metric-label">Total Rodado</span>
+            <strong class="metric-value">${formatHours(totalDrivingHours)}h</strong>
+            <span class="metric-trend success">Todas as campanhas</span>
+          </div>
+        </article>
+        <article class="card">
+          <div class="metric">
+            <span class="metric-label">Total Propaganda</span>
+            <strong class="metric-value">${formatHours(totalPropagandaHours)}h</strong>
+            <span class="metric-trend success">${formatPercentage(totalDrivingHours, totalPropagandaHours)}% do tempo</span>
+          </div>
+        </article>
+        <article class="card">
+          <div class="metric">
+            <span class="metric-label">Tablets Online</span>
+            <strong class="metric-value">${onlineDevices}</strong>
+            <span class="metric-trend">${devices.length} cadastrados</span>
+          </div>
+        </article>
+        <article class="card">
+          <div class="metric">
+            <span class="metric-label">Abaixo da Meta</span>
+            <strong class="metric-value">${devicesBelowGoal}</strong>
+            <span class="metric-trend ${devicesBelowGoal > 0 ? 'danger' : ''}">Meta: ${DAILY_GOAL_HOURS}h/dia</span>
+          </div>
+        </article>
+      </section>
+
+      <section class="card" style="margin-top: 20px;">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Alertas do Dia</h3>
+            <p class="card-subtitle">Motoristas que não atingiram a meta de ${DAILY_GOAL_HOURS} horas</p>
+          </div>
+        </div>
+        <div class="alerts-list">
+          ${alertRows}
+        </div>
+      </section>
+
+      <section class="card" style="margin-top: 20px;">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Registros de Horas</h3>
+            <p class="card-subtitle">Horas rodadas x propaganda exibida</p>
+          </div>
+          <div class="filter-controls">
+            <select id="filter-period" class="select">
+              <option value="today">Hoje</option>
+              <option value="week">Última semana</option>
+              <option value="month">Este mês</option>
+              <option value="custom">Personalizado</option>
+            </select>
+            <input type="date" id="filter-date-start" class="input" value="${today}" />
+            <input type="date" id="filter-date-end" class="input" value="${today}" />
+            <select id="filter-device" class="select">
+              <option value="">Todos os tablets</option>
+              ${devices.map(d => `<option value="${d.id}">${d.name || d.id}</option>`).join('')}
+            </select>
+            <button class="button primary" id="export-hours-btn">Exportar Excel</button>
+          </div>
+        </div>
+        ${hourRows ? `
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Tablet</th>
+                  <th>Veículo</th>
+                  <th>Motorista</th>
+                  <th>Horas Rodagem</th>
+                  <th>Horas Propaganda</th>
+                  <th>% Propaganda</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>${hourRows}</tbody>
+            </table>
+          </div>
+        ` : `
+          <div class="empty-state">
+            <h3>Nenhum registro de horas</h3>
+            <p>Os dados aparecerão aqui quando os tablets começarem a rastrear horas.</p>
+          </div>
+        `}
+      </section>
+
+      <section class="card" style="margin-top: 20px;">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Resumo Mensal</h3>
+            <p class="card-subtitle">Estatísticas do mês atual</p>
+          </div>
+        </div>
+        <div class="month-summary">
+          <div class="summary-item">
+            <span class="summary-label">Mês:</span>
+            <span class="summary-value">${currentMonth}/${currentYear}</span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">Dias com dados:</span>
+            <span class="summary-value">${new Set(hoursData.map(h => h.date)).size}</span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">Média diária rodagem:</span>
+            <span class="summary-value">${hoursData.length > 0 ? formatHours(totalDrivingHours / new Set(hoursData.map(h => h.date)).size) : '0'}h</span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">Eficiência propaganda:</span>
+            <span class="summary-value">${formatPercentage(totalDrivingHours, totalPropagandaHours)}%</span>
+          </div>
+        </div>
       </section>
     `,
     '<button class="button ghost" data-action="logout">Sair</button>'

@@ -1,8 +1,9 @@
 import { loginTemplate, appTemplate } from './templates.js';
-import { dashboardView, devicesView, videosView, playlistsView, monitorView, mapView, settingsView, connectionsView } from './views.js';
+import { dashboardView, devicesView, videosView, playlistsView, monitorView, mapView, settingsView, connectionsView, hoursView } from './views.js';
 import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylist, fetchCollection, deleteDocument, assignPlaylistToDevice, unassignPlaylistFromDevice, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, updatePlaylist, approveConnectionRequest } from './firebase.js';
 import { hasAppwriteConfig, uploadVideo, deleteVideoFile } from './appwrite.js';
 import { exportToExcel } from './export-excel.js';
+import { fetchTodayHours, fetchMonthHours, fetchActiveAlerts, fetchHoursByDateRange, fetchHoursByDevice, dismissAlert, checkAndCreateAlerts, exportHoursToExcel, initHoursFirebase } from './firebase-hours.js';
 
 const app = document.querySelector('#app');
 const isDemo = !(hasFirebaseConfig && hasAppwriteConfig);
@@ -21,6 +22,8 @@ const state = {
   playlists: [],
   connectionRequests: [],
   activity: [],
+  hoursData: [],
+  alerts: [],
   loading: true,
   unsubscribe: null,
 };
@@ -81,6 +84,7 @@ const navItems = [
   { key: 'dashboard', label: 'Visão Geral', icon: '◫' },
   { key: 'devices', label: 'Tablets', icon: '▣' },
   { key: 'connections', label: 'Conexões', icon: '🔗' },
+  { key: 'hours', label: 'Horas', icon: '⏱' },
   { key: 'videos', label: 'Vídeos', icon: '▶' },
   { key: 'playlists', label: 'Playlists', icon: '≣' },
   { key: 'monitor', label: 'Monitoramento', icon: '◌' },
@@ -139,11 +143,13 @@ async function loadData() {
   }
 
   try {
-    const [devicesData, videosData, playlistsData, connectionRequestsData] = await Promise.all([
+    const [devicesData, videosData, playlistsData, connectionRequestsData, hoursData, alertsData] = await Promise.all([
       fetchCollection('devices'),
       fetchCollection('videos'),
       fetchCollection('playlists'),
       fetchCollection('connectionRequests'),
+      fetchTodayHours(),
+      fetchActiveAlerts()
     ]);
 
     const now = Date.now();
@@ -165,6 +171,8 @@ async function loadData() {
     state.videos = videosData;
     state.playlists = playlistsData;
     state.connectionRequests = connectionRequestsData.filter(r => r.status === 'pending');
+    state.hoursData = hoursData;
+    state.alerts = alertsData;
 
     const onlineCount = devicesWithStatus.filter(d => d.status === 'online').length;
     const offlineCount = devicesWithStatus.filter(d => d.status === 'offline').length;
@@ -218,6 +226,7 @@ function renderView() {
     dashboard: dashboardView(payload),
     devices: devicesView(payload),
     connections: connectionsView(payload),
+    hours: hoursView(payload),
     videos: videosView(payload),
     playlists: playlistsView(payload),
     monitor: monitorView(payload),
@@ -227,6 +236,7 @@ function renderView() {
 
   view.innerHTML = views[state.route] || views.dashboard;
   bindForms();
+  bindHoursView();
   
   if (state.route === 'map') {
     console.log('renderView - route is map, scheduling initMap');
@@ -988,6 +998,127 @@ function updateDeviceStatusUI(devices) {
   });
 
   updateMetricsCards(view, state.metrics);
+}
+
+async function bindHoursView() {
+  if (state.route !== 'hours') return;
+
+  const filterPeriod = document.getElementById('filter-period');
+  const filterDateStart = document.getElementById('filter-date-start');
+  const filterDateEnd = document.getElementById('filter-date-end');
+  const filterDevice = document.getElementById('filter-device');
+  const exportBtn = document.getElementById('export-hours-btn');
+
+  filterDateStart.style.display = 'none';
+  filterDateEnd.style.display = 'none';
+
+  if (filterPeriod) {
+    filterPeriod.addEventListener('change', async (e) => {
+      const period = e.target.value;
+      
+      if (period === 'custom') {
+        filterDateStart.style.display = 'inline-block';
+        filterDateEnd.style.display = 'inline-block';
+      } else {
+        filterDateStart.style.display = 'none';
+        filterDateEnd.style.display = 'none';
+      }
+
+      await applyHoursFilter();
+    });
+  }
+
+  if (filterDateStart) {
+    filterDateStart.addEventListener('change', applyHoursFilter);
+    filterDateEnd.addEventListener('change', applyHoursFilter);
+  }
+
+  if (filterDevice) {
+    filterDevice.addEventListener('change', applyHoursFilter);
+  }
+
+  if (exportBtn) {
+    exportBtn.addEventListener('click', async () => {
+      const data = await exportHoursToExcel(state.hoursData, state.devices);
+      if (data && data.length > 0) {
+        const timestamp = new Date().toISOString().split('T')[0];
+        exportToExcel({ hoursReport: data }, `relatorio-horas-${timestamp}`);
+        showToast('Relatório Exportado', 'O arquivo Excel foi baixado com sucesso.', 'success');
+      } else {
+        showToast('Sem dados', 'Não há dados para exportar no período selecionado.', 'warning');
+      }
+    });
+  }
+
+  document.querySelectorAll('[data-dismiss-alert]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const alertId = btn.dataset.dismissAlert;
+      try {
+        await dismissAlert(alertId);
+        state.alerts = state.alerts.filter(a => a.id !== alertId);
+        btn.closest('.alert-item')?.remove();
+        showToast('Alerta dispensado', 'O alerta foi removido da lista.', 'success');
+      } catch (error) {
+        showToast('Erro', 'Não foi possível dispensar o alerta.', 'error');
+      }
+    });
+  });
+}
+
+async function applyHoursFilter() {
+  if (!hasFirebaseConfig) return;
+
+  const filterPeriod = document.getElementById('filter-period');
+  const filterDateStart = document.getElementById('filter-date-start');
+  const filterDateEnd = document.getElementById('filter-date-end');
+  const filterDevice = document.getElementById('filter-device');
+
+  if (!filterPeriod) return;
+
+  const period = filterPeriod.value;
+  const deviceId = filterDevice?.value || '';
+  const today = new Date().toISOString().split('T')[0];
+
+  let startDate, endDate;
+
+  switch (period) {
+    case 'today':
+      startDate = endDate = today;
+      break;
+    case 'week':
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      startDate = weekAgo.toISOString().split('T')[0];
+      endDate = today;
+      break;
+    case 'month':
+      const year = new Date().getFullYear();
+      const month = new Date().getMonth() + 1;
+      startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+      const lastDay = new Date(year, month, 0).getDate();
+      endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+      break;
+    case 'custom':
+      startDate = filterDateStart?.value || today;
+      endDate = filterDateEnd?.value || today;
+      break;
+  }
+
+  try {
+    let filteredData;
+    
+    if (deviceId) {
+      filteredData = await fetchHoursByDevice(deviceId, startDate, endDate);
+    } else {
+      filteredData = await fetchHoursByDateRange(startDate, endDate);
+    }
+
+    state.hoursData = filteredData;
+    render();
+  } catch (error) {
+    console.error('Erro ao filtrar horas:', error);
+    showToast('Erro', 'Não foi possível filtrar os dados.', 'error');
+  }
 }
 
 function updateMetricsCards(view, metrics) {
