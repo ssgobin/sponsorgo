@@ -31,6 +31,10 @@ function formatDeviceStatus(status) {
   return status || '—';
 }
 
+function countItems(value) {
+  return Array.isArray(value) ? value.length : Number(value) || 0;
+}
+
 export function dashboardView(data) {
   const { metrics, devices, activity, isDemo, videos } = data;
 
@@ -314,9 +318,6 @@ export function videosView(data) {
 }
 
 export function playlistsView(data) {
-  const videoOptions = data.videos.map((video) => `<option value="${video.id || video.title}">${video.title}</option>`).join('');
-  const deviceOptions = data.devices.map((device) => `<option value="${device.id || device.name}">${device.name}</option>`).join('');
-  
   const items = data.playlists.length > 0 ? data.playlists.map((playlist) => `
     <div class="list-item">
       <div>

@@ -1,6 +1,6 @@
 import { loginTemplate, appTemplate } from './templates.js';
 import { dashboardView, devicesView, videosView, playlistsView, monitorView, mapView, settingsView, connectionsView } from './views.js';
-import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylist, fetchCollection, deleteDocument, assignPlaylistToDevice, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, updatePlaylist, approveConnectionRequest } from './firebase.js';
+import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylist, fetchCollection, deleteDocument, assignPlaylistToDevice, unassignPlaylistFromDevice, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, updatePlaylist, approveConnectionRequest } from './firebase.js';
 import { hasAppwriteConfig, uploadVideo, deleteVideoFile } from './appwrite.js';
 import { exportToExcel } from './export-excel.js';
 
@@ -24,6 +24,58 @@ const state = {
   loading: true,
   unsubscribe: null,
 };
+
+function toArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function getPlaylistVideoIds(playlist) {
+  return toArray(playlist?.videos)
+    .map((video) => typeof video === 'string' ? video : (video?.id || video?.title || video?.name || ''))
+    .filter(Boolean);
+}
+
+function getPlaylistDeviceIds(playlist) {
+  return toArray(playlist?.devices)
+    .map((device) => typeof device === 'string' ? device : (device?.id || device?.name || ''))
+    .filter(Boolean);
+}
+
+function buildPlaylistVideos(selectedVideoIds) {
+  return state.videos
+    .filter((video) => selectedVideoIds.includes(video.id) || selectedVideoIds.includes(video.title))
+    .map((video, index) => ({
+      id: video.id,
+      fileId: video.fileId || '',
+      name: video.title,
+      order: index,
+      active: true
+    }));
+}
+
+function findDevicePlaylistConflicts(selectedDeviceIds, currentPlaylistId = null) {
+  const selected = new Set(selectedDeviceIds);
+
+  return state.playlists
+    .filter((playlist) => playlist.id !== currentPlaylistId && !playlist.deletedAt)
+    .filter((playlist) => getPlaylistDeviceIds(playlist).some((deviceId) => selected.has(deviceId)))
+    .map((playlist) => playlist.name || playlist.id);
+}
+
+async function syncPlaylistAssignments(playlistId, previousDeviceIds, selectedDeviceIds) {
+  const previous = new Set(previousDeviceIds);
+  const selected = new Set(selectedDeviceIds);
+
+  for (const deviceId of selected) {
+    await assignPlaylistToDevice(deviceId, playlistId);
+  }
+
+  for (const deviceId of previous) {
+    if (!selected.has(deviceId)) {
+      await unassignPlaylistFromDevice(deviceId, playlistId);
+    }
+  }
+}
 
 const navItems = [
   { key: 'dashboard', label: 'Visão Geral', icon: '◫' },
@@ -444,6 +496,9 @@ function showDeleteModal(type, id, fileId) {
 
 async function performDelete(type, id, fileId) {
   try {
+    const deletedPlaylist = type === 'playlist'
+      ? state.playlists.find((playlist) => playlist.id === id)
+      : null;
     if (type === 'vídeo' && fileId && hasAppwriteConfig) {
       await deleteVideoFile(fileId);
     }
@@ -455,6 +510,12 @@ async function performDelete(type, id, fileId) {
         'playlist': 'playlists',
       };
       await deleteDocument(collectionMap[type], id);
+
+      if (type === 'playlist') {
+        for (const deviceId of getPlaylistDeviceIds(deletedPlaylist)) {
+          await unassignPlaylistFromDevice(deviceId, id);
+        }
+      }
     }
 
     await loadData();
@@ -537,8 +598,11 @@ function showEditPlaylistModal(playlistId) {
   const playlist = state.playlists.find(p => p.id === playlistId);
   if (!playlist) return;
 
+  const currentVideoIds = new Set(getPlaylistVideoIds(playlist));
+  const currentDeviceIds = getPlaylistDeviceIds(playlist);
+
   const videoCheckboxItems = state.videos.map(video => {
-    const isChecked = playlist.videos?.some(v => v.id === video.id) ? 'checked' : '';
+    const isChecked = currentVideoIds.has(video.id) || currentVideoIds.has(video.title) ? 'checked' : '';
     return `
       <label class="checkbox-item">
         <input type="checkbox" name="videos" value="${video.id}" ${isChecked} />
@@ -549,7 +613,7 @@ function showEditPlaylistModal(playlistId) {
   }).join('');
 
   const deviceCheckboxItems = state.devices.map(device => {
-    const isChecked = playlist.devices?.includes(device.id) ? 'checked' : '';
+    const isChecked = currentDeviceIds.includes(device.id) ? 'checked' : '';
     return `
       <label class="checkbox-item">
         <input type="checkbox" name="devices" value="${device.id}" ${isChecked} />
@@ -599,15 +663,13 @@ function showEditPlaylistModal(playlistId) {
     const selectedVideoIds = Array.from(e.target.querySelectorAll('input[name="videos"]:checked')).map(cb => cb.value);
     const selectedDeviceIds = Array.from(e.target.querySelectorAll('input[name="devices"]:checked')).map(cb => cb.value);
 
-    const videosWithMeta = state.videos
-      .filter(v => selectedVideoIds.includes(v.id))
-      .map((v, index) => ({
-        id: v.id,
-        fileId: v.fileId || '',
-        name: v.title,
-        order: index,
-        active: true
-      }));
+    const conflicts = findDevicePlaylistConflicts(selectedDeviceIds, playlistId);
+    if (conflicts.length > 0) {
+      showToast('Tablet jÃ¡ em uso', `Remova o tablet da playlist ${conflicts.join(', ')} antes de salvar.`, 'warning');
+      return;
+    }
+
+    const videosWithMeta = buildPlaylistVideos(selectedVideoIds);
 
     const payload = {
       name: String(e.target.querySelector('[name="name"]').value).trim(),
@@ -618,9 +680,7 @@ function showEditPlaylistModal(playlistId) {
     try {
       if (hasFirebaseConfig) {
         await updatePlaylist(playlistId, payload);
-        for (const devId of selectedDeviceIds) {
-          await assignPlaylistToDevice(devId, playlistId);
-        }
+        await syncPlaylistAssignments(playlistId, currentDeviceIds, selectedDeviceIds);
       }
       modal.remove();
       await loadData();
@@ -804,15 +864,13 @@ function bindPlaylistForm() {
     const selectedVideoIds = Array.from(form.querySelectorAll('input[name="videos"]:checked')).map(cb => cb.value);
     const selectedDeviceIds = Array.from(form.querySelectorAll('input[name="devices"]:checked')).map(cb => cb.value);
 
-    const videosWithMeta = state.videos
-      .filter(v => selectedVideoIds.includes(v.id) || selectedVideoIds.includes(v.title))
-      .map((v, index) => ({
-        id: v.id,
-        fileId: v.fileId || '',
-        name: v.title,
-        order: index,
-        active: true
-      }));
+    const conflicts = findDevicePlaylistConflicts(selectedDeviceIds);
+    if (conflicts.length > 0) {
+      showToast('Tablet jÃ¡ em uso', `Remova o tablet da playlist ${conflicts.join(', ')} antes de criar outra.`, 'warning');
+      return;
+    }
+
+    const videosWithMeta = buildPlaylistVideos(selectedVideoIds);
 
     const payload = {
       name: String(formData.get('name')).trim(),
@@ -826,9 +884,7 @@ function bindPlaylistForm() {
       
       if (hasFirebaseConfig) {
         const playlistId = await addPlaylist(payload);
-        for (const deviceId of selectedDeviceIds) {
-          await assignPlaylistToDevice(deviceId, playlistId);
-        }
+        await syncPlaylistAssignments(playlistId, [], selectedDeviceIds);
       }
       
       hideLoading();

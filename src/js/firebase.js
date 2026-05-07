@@ -11,6 +11,7 @@ import {
   orderBy,
   serverTimestamp,
   deleteDoc,
+  getDoc,
   where,
   onSnapshot,
   updateDoc,
@@ -71,7 +72,7 @@ export async function deleteDocument(collectionName, docId) {
   if (!db) throw new Error('Firebase não configurado.');
   
   if (collectionName === 'playlists') {
-    await updateDoc(doc(db, collectionName, docId), { deletedAt: serverTimestamp() });
+    await updateDoc(doc(db, collectionName, docId), { deletedAt: serverTimestamp(), status: 'ExcluÃ­da' });
   } else {
     await deleteDoc(doc(db, collectionName, docId));
   }
@@ -89,6 +90,18 @@ export async function assignPlaylistToDevice(deviceId, playlistId) {
   return ref.id;
 }
 
+export async function unassignPlaylistFromDevice(deviceId, playlistId = null) {
+  if (!db) throw new Error('Firebase nÃ£o configurado.');
+  const ref = doc(db, 'deviceAssignments', deviceId);
+
+  if (playlistId) {
+    const snap = await getDoc(ref);
+    if (!snap.exists() || snap.get('playlistId') !== playlistId) return;
+  }
+
+  await deleteDoc(ref);
+}
+
 export function subscribeToDevices(callback) {
   if (!db) return () => {};
   const q = query(collection(db, 'devices'), orderBy('createdAt', 'desc'));
@@ -102,7 +115,9 @@ export function subscribeToPlaylists(callback) {
   if (!db) return () => {};
   const q = query(collection(db, 'playlists'), orderBy('createdAt', 'desc'));
   return onSnapshot(q, (snapshot) => {
-    const data = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    const data = snapshot.docs
+      .map((item) => ({ id: item.id, ...item.data() }))
+      .filter((playlist) => !playlist.deletedAt);
     callback(data);
   });
 }
