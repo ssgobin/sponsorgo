@@ -207,17 +207,25 @@ export async function checkAndCreateAlerts(devices, hoursData) {
 }
 
 export function subscribeToHours(callback) {
-  if (!db || !hasFirebaseConfig) return () => {};
+  if (!db || !hasFirebaseConfig) {
+    console.warn('subscribeToHours: Firebase não configurado');
+    return () => {};
+  }
+  
+  console.log('subscribeToHours: Iniciando subscribe na coleção', HOURS_COLLECTION);
   
   const q = query(
     collection(db, HOURS_COLLECTION),
-    orderBy('date', 'desc'),
-    orderBy('createdAt', 'desc')
+    orderBy('date', 'desc')
   );
   
   return onSnapshot(q, (snapshot) => {
+    console.log('subscribeToHours - snapshot size:', snapshot.size);
     const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    console.log('subscribeToHours - primeiro documento:', data[0]);
     callback(data);
+  }, (error) => {
+    console.error('subscribeToHours - erro:', error);
   });
 }
 

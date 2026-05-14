@@ -3,7 +3,7 @@ import { dashboardView, devicesView, videosView, playlistsView, monitorView, map
 import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylist, fetchCollection, deleteDocument, assignPlaylistToDevice, unassignPlaylistFromDevice, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, updatePlaylist, approveConnectionRequest } from './firebase.js';
 import { hasAppwriteConfig, uploadVideo, deleteVideoFile } from './appwrite.js';
 import { exportToExcel } from './export-excel.js';
-import { fetchTodayHours, fetchMonthHours, fetchActiveAlerts, fetchHoursByDateRange, fetchHoursByDevice, dismissAlert, checkAndCreateAlerts, exportHoursToExcel, initHoursFirebase } from './firebase-hours.js';
+import { fetchTodayHours, fetchMonthHours, fetchActiveAlerts, fetchHoursByDateRange, fetchHoursByDevice, dismissAlert, checkAndCreateAlerts, exportHoursToExcel, initHoursFirebase, subscribeToHours } from './firebase-hours.js';
 
 const app = document.querySelector('#app');
 const isDemo = !(hasFirebaseConfig && hasAppwriteConfig);
@@ -673,6 +673,10 @@ function showEditPlaylistModal(playlistId) {
     const selectedVideoIds = Array.from(e.target.querySelectorAll('input[name="videos"]:checked')).map(cb => cb.value);
     const selectedDeviceIds = Array.from(e.target.querySelectorAll('input[name="devices"]:checked')).map(cb => cb.value);
 
+    console.log('IDs de vídeos selecionados:', selectedVideoIds);
+    console.log('Vídeos disponíveis no state:', state.videos.map(v => ({ id: v.id, title: v.title })));
+    console.log('Videos found:', buildPlaylistVideos(selectedVideoIds));
+
     const conflicts = findDevicePlaylistConflicts(selectedDeviceIds, playlistId);
     if (conflicts.length > 0) {
       showToast('Tablet jÃ¡ em uso', `Remova o tablet da playlist ${conflicts.join(', ')} antes de salvar.`, 'warning');
@@ -685,11 +689,14 @@ function showEditPlaylistModal(playlistId) {
       name: String(e.target.querySelector('[name="name"]').value).trim(),
       videos: videosWithMeta,
       devices: selectedDeviceIds,
+      status: playlist.status || 'Ativa',
     };
 
-    try {
+try {
       if (hasFirebaseConfig) {
+        console.log('Atualizando playlist:', playlistId, payload);
         await updatePlaylist(playlistId, payload);
+        console.log('Sincronizando assignments para devices:', selectedDeviceIds);
         await syncPlaylistAssignments(playlistId, currentDeviceIds, selectedDeviceIds);
       }
       modal.remove();
@@ -698,7 +705,7 @@ function showEditPlaylistModal(playlistId) {
       showToast('Salvo', 'Playlist atualizada com sucesso.', 'success');
     } catch (error) {
       console.error('Erro ao editar playlist:', error);
-      showToast('Erro', 'Não foi possível salvar a playlist.', 'error');
+      showToast('Erro', `Não foi possível salvar a playlist: ${error.message}`, 'error');
     }
   });
 }
@@ -956,10 +963,19 @@ function setupRealtimeListeners() {
     render();
   });
 
+  const unsubHours = subscribeToHours((hoursData) => {
+    console.log('Horas recebidas do Firebase:', hoursData);
+    state.hoursData = hoursData;
+    if (state.route === 'hours') {
+      render();
+    }
+  });
+
   state.unsubscribe = () => {
     unsubDevices();
     unsubPlaylists();
     unsubConnectionRequests();
+    unsubHours();
   };
 }
 
@@ -1066,8 +1082,6 @@ async function bindHoursView() {
 }
 
 async function applyHoursFilter() {
-  if (!hasFirebaseConfig) return;
-
   const filterPeriod = document.getElementById('filter-period');
   const filterDateStart = document.getElementById('filter-date-start');
   const filterDateEnd = document.getElementById('filter-date-end');
@@ -1081,15 +1095,26 @@ async function applyHoursFilter() {
 
   let startDate, endDate;
 
+  const getLocalDate = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   switch (period) {
     case 'today':
-      startDate = endDate = today;
+      startDate = endDate = getLocalDate();
       break;
     case 'week':
       const weekAgo = new Date();
       weekAgo.setDate(weekAgo.getDate() - 7);
-      startDate = weekAgo.toISOString().split('T')[0];
-      endDate = today;
+      const wYear = weekAgo.getFullYear();
+      const wMonth = String(weekAgo.getMonth() + 1).padStart(2, '0');
+      const wDay = String(weekAgo.getDate()).padStart(2, '0');
+      startDate = `${wYear}-${wMonth}-${wDay}`;
+      endDate = getLocalDate();
       break;
     case 'month':
       const year = new Date().getFullYear();
@@ -1099,26 +1124,36 @@ async function applyHoursFilter() {
       endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
       break;
     case 'custom':
-      startDate = filterDateStart?.value || today;
-      endDate = filterDateEnd?.value || today;
+      startDate = filterDateStart?.value || getLocalDate();
+      endDate = filterDateEnd?.value || getLocalDate();
       break;
+    default:
+      startDate = getLocalDate();
+      endDate = getLocalDate();
   }
 
-  try {
-    let filteredData;
-    
-    if (deviceId) {
-      filteredData = await fetchHoursByDevice(deviceId, startDate, endDate);
-    } else {
-      filteredData = await fetchHoursByDateRange(startDate, endDate);
-    }
+  console.log('Filtrando:', { period, deviceId, startDate, endDate });
+  console.log('state.hoursData atual:', state.hoursData.length);
 
-    state.hoursData = filteredData;
-    render();
-  } catch (error) {
-    console.error('Erro ao filtrar horas:', error);
-    showToast('Erro', 'Não foi possível filtrar os dados.', 'error');
+  let allHours = state.hoursData;
+  if (allHours.length === 0) {
+    const localToday = getLocalDate();
+    allHours = await fetchHoursByDateRange(localToday, localToday);
   }
+  console.log('horas disponíveis para filtro:', allHours.length);
+
+  let filteredData = allHours.filter(h => {
+    const date = h.date || '';
+    console.log('data no registro:', date, 'startDate:', startDate, 'endDate:', endDate, 'comparação:', date >= startDate && date <= endDate);
+    const inDateRange = date >= startDate && date <= endDate;
+    const matchesDevice = !deviceId || h.deviceId === deviceId;
+    return inDateRange && matchesDevice;
+  });
+
+  console.log('Dados filtrados:', filteredData.length);
+
+  state.hoursData = filteredData;
+  render();
 }
 
 function updateMetricsCards(view, metrics) {

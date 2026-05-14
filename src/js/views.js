@@ -621,8 +621,13 @@ export function hoursView(data) {
   const currentDay = String(new Date().getDate()).padStart(2, '0');
   
   const formatHours = (seconds) => {
-    const hours = Math.floor((seconds || 0) / 3600);
-    return hours.toFixed(1);
+    const totalMinutes = Math.floor((seconds || 0) / 60);
+    if (totalMinutes < 60) {
+      return `${totalMinutes} min`;
+    }
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    return mins > 0 ? `${hours}h ${mins}min` : `${hours}h`;
   };
   
   const formatPercentage = (driving, propaganda) => {
@@ -649,8 +654,8 @@ export function hoursView(data) {
       <td><strong>${device?.name || record.deviceId || '—'}</strong></td>
       <td>${device?.car || '—'}</td>
       <td>${device?.driver || '—'}</td>
-      <td class="hours-cell">${formatHours(driving)}h</td>
-      <td class="hours-cell">${formatHours(propaganda)}h</td>
+      <td class="hours-cell">${formatHours(driving)}</td>
+      <td class="hours-cell">${formatHours(propaganda)}</td>
       <td class="percentage-cell">${percentage}%</td>
       <td><span class="status ${isGoalMet ? 'online' : 'offline'}">${isGoalMet ? 'Meta atingida' : 'Abaixo da meta'}</span></td>
     </tr>
@@ -677,14 +682,14 @@ export function hoursView(data) {
         <article class="card">
           <div class="metric">
             <span class="metric-label">Total Rodado</span>
-            <strong class="metric-value">${formatHours(totalDrivingHours)}h</strong>
+            <strong class="metric-value">${formatHours(totalDrivingHours)}</strong>
             <span class="metric-trend success">Todas as campanhas</span>
           </div>
         </article>
         <article class="card">
           <div class="metric">
             <span class="metric-label">Total Propaganda</span>
-            <strong class="metric-value">${formatHours(totalPropagandaHours)}h</strong>
+            <strong class="metric-value">${formatHours(totalPropagandaHours)}</strong>
             <span class="metric-trend success">${formatPercentage(totalDrivingHours, totalPropagandaHours)}% do tempo</span>
           </div>
         </article>
@@ -782,7 +787,7 @@ export function hoursView(data) {
           </div>
           <div class="summary-item">
             <span class="summary-label">Média diária rodagem:</span>
-            <span class="summary-value">${hoursData.length > 0 ? formatHours(totalDrivingHours / new Set(hoursData.map(h => h.date)).size) : '0'}h</span>
+            <span class="summary-value">${hoursData.length > 0 ? formatHours(totalDrivingHours / new Set(hoursData.map(h => h.date)).size) : '0 min'}</span>
           </div>
           <div class="summary-item">
             <span class="summary-label">Eficiência propaganda:</span>
