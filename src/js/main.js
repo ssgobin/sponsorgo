@@ -1,6 +1,6 @@
 import { loginTemplate, appTemplate } from './templates.js';
 import { dashboardView, devicesView, videosView, playlistsView, monitorView, mapView, settingsView, connectionsView, hoursView } from './views.js';
-import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylist, fetchCollection, deleteDocument, assignPlaylistToDevice, unassignPlaylistFromDevice, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, updatePlaylist, approveConnectionRequest } from './firebase.js';
+import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylistWithAssignments, updatePlaylistWithAssignments, softDeletePlaylistWithAssignments, deleteVideoAndPrunePlaylists, fetchCollection, deleteDocument, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, approveConnectionWithDevice } from './firebase.js';
 import { hasAppwriteConfig, uploadVideo, deleteVideoFile } from './appwrite.js';
 import { exportToExcel } from './export-excel.js';
 import { fetchTodayHours, fetchMonthHours, fetchActiveAlerts, fetchHoursByDateRange, fetchHoursByDevice, dismissAlert, checkAndCreateAlerts, exportHoursToExcel, initHoursFirebase, subscribeToHours } from './firebase-hours.js';
@@ -23,10 +23,137 @@ const state = {
   connectionRequests: [],
   activity: [],
   hoursData: [],
+  allHoursData: [],
+  hoursFilters: {
+    period: 'today',
+    deviceId: '',
+    startDate: '',
+    endDate: '',
+  },
   alerts: [],
   loading: true,
   unsubscribe: null,
+  collapsedNavSections: {},
 };
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function getLocalDateString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getHoursDateRange(filters = state.hoursFilters) {
+  const period = filters.period || 'today';
+
+  switch (period) {
+    case 'week': {
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      return {
+        startDate: getLocalDateString(weekAgo),
+        endDate: getLocalDateString(),
+      };
+    }
+    case 'month': {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth() + 1;
+      const lastDay = new Date(year, month, 0).getDate();
+      return {
+        startDate: `${year}-${String(month).padStart(2, '0')}-01`,
+        endDate: `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`,
+      };
+    }
+    case 'custom':
+      return {
+        startDate: filters.startDate || getLocalDateString(),
+        endDate: filters.endDate || filters.startDate || getLocalDateString(),
+      };
+    case 'today':
+    default:
+      return {
+        startDate: getLocalDateString(),
+        endDate: getLocalDateString(),
+      };
+  }
+}
+
+function getResolvedHoursFilters() {
+  const range = getHoursDateRange();
+  return {
+    ...state.hoursFilters,
+    ...range,
+  };
+}
+
+function getFilteredHoursData() {
+  const { startDate, endDate, deviceId } = getResolvedHoursFilters();
+  return state.allHoursData.filter((record) => {
+    const date = record.date || '';
+    const inDateRange = date >= startDate && date <= endDate;
+    const matchesDevice = !deviceId || record.deviceId === deviceId;
+    return inDateRange && matchesDevice;
+  });
+}
+
+function formatVideoDuration(seconds) {
+  const totalSeconds = Math.max(0, Math.round(seconds || 0));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+
+  return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+function detectVideoDuration(file) {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    const objectUrl = URL.createObjectURL(file);
+
+    const cleanup = () => {
+      URL.revokeObjectURL(objectUrl);
+      video.removeAttribute('src');
+      video.load();
+    };
+
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      cleanup();
+      resolve(formatVideoDuration(duration));
+    };
+    video.onerror = () => {
+      cleanup();
+      reject(new Error('Não foi possível detectar a duração do vídeo.'));
+    };
+    video.src = objectUrl;
+  });
+}
+
+function escapeCssValue(value) {
+  const text = String(value ?? '');
+  if (window.CSS?.escape) return window.CSS.escape(text);
+  return text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function safeCssClass(value, fallback = '') {
+  const text = String(value ?? fallback);
+  return /^[a-z0-9_-]+$/i.test(text) ? text : fallback;
+}
 
 function toArray(value) {
   return Array.isArray(value) ? value : [];
@@ -65,32 +192,33 @@ function findDevicePlaylistConflicts(selectedDeviceIds, currentPlaylistId = null
     .map((playlist) => playlist.name || playlist.id);
 }
 
-async function syncPlaylistAssignments(playlistId, previousDeviceIds, selectedDeviceIds) {
-  const previous = new Set(previousDeviceIds);
-  const selected = new Set(selectedDeviceIds);
-
-  for (const deviceId of selected) {
-    await assignPlaylistToDevice(deviceId, playlistId);
-  }
-
-  for (const deviceId of previous) {
-    if (!selected.has(deviceId)) {
-      await unassignPlaylistFromDevice(deviceId, playlistId);
-    }
-  }
-}
-
 const navItems = [
+  { type: 'section', key: 'operation', label: 'Operação' },
   { key: 'dashboard', label: 'Visão Geral', icon: '◫' },
-  { key: 'devices', label: 'Tablets', icon: '▣' },
-  { key: 'connections', label: 'Conexões', icon: '🔗' },
-  { key: 'hours', label: 'Horas', icon: '⏱' },
-  { key: 'videos', label: 'Vídeos', icon: '▶' },
-  { key: 'playlists', label: 'Playlists', icon: '≣' },
   { key: 'monitor', label: 'Monitoramento', icon: '◌' },
   { key: 'map', label: 'Mapa', icon: '🗺' },
+  { key: 'hours', label: 'Horas', icon: '⏱' },
+  { type: 'section', key: 'devices', label: 'Dispositivos' },
+  { key: 'connections', label: 'Conexões', icon: '🔗' },
+  { key: 'devices', label: 'Tablets', icon: '▣' },
+  { type: 'section', key: 'content', label: 'Conteúdo' },
+  { key: 'playlists', label: 'Playlists', icon: '≣' },
+  { key: 'videos', label: 'Vídeos', icon: '▶' },
+  { type: 'section', key: 'system', label: 'Sistema' },
   { key: 'settings', label: 'Configurações', icon: '⚙' },
 ];
+
+function getSectionForRoute(route) {
+  let currentSection = null;
+  for (const item of navItems) {
+    if (item.type === 'section') {
+      currentSection = item.key;
+    } else if (item.key === route) {
+      return currentSection;
+    }
+  }
+  return null;
+}
 
 function showToast(title, message, type = 'info') {
   const container = document.querySelector('.toast-container') || createToastContainer();
@@ -101,8 +229,8 @@ function showToast(title, message, type = 'info') {
   toast.innerHTML = `
     <span class="toast-icon">${icons[type]}</span>
     <div class="toast-content">
-      <div class="toast-title">${title}</div>
-      <div class="toast-message">${message}</div>
+      <div class="toast-title">${escapeHtml(title)}</div>
+      <div class="toast-message">${escapeHtml(message)}</div>
     </div>
     <button class="toast-close">✕</button>
   `;
@@ -127,7 +255,7 @@ function showLoading(message = 'Carregando...') {
   overlay.id = 'global-loading';
   overlay.innerHTML = `
     <div class="loading-spinner"></div>
-    <p>${message}</p>
+    <p>${escapeHtml(message)}</p>
   `;
   document.body.appendChild(overlay);
 }
@@ -172,6 +300,7 @@ async function loadData() {
     state.playlists = playlistsData;
     state.connectionRequests = connectionRequestsData.filter(r => r.status === 'pending');
     state.hoursData = hoursData;
+    state.allHoursData = hoursData;
     state.alerts = alertsData;
 
     const onlineCount = devicesWithStatus.filter(d => d.status === 'online').length;
@@ -210,17 +339,40 @@ function render() {
 
 function renderNav() {
   const nav = document.querySelector('#nav');
-  nav.innerHTML = navItems.map((item) => `
-    <button class="nav-button ${state.route === item.key ? 'active' : ''}" data-route="${item.key}">
-      <span class="nav-icon">${item.icon}</span>
-      <span>${item.label}</span>
-    </button>
-  `).join('');
+  let currentSection = null;
+  const activeSection = getSectionForRoute(state.route);
+
+  nav.innerHTML = navItems.map((item) => {
+    if (item.type === 'section') {
+      currentSection = item.key;
+      const isCollapsed = Boolean(state.collapsedNavSections[item.key]) && activeSection !== item.key;
+      return `
+        <button class="nav-section ${isCollapsed ? 'collapsed' : ''}" data-nav-section="${item.key}" type="button">
+          <span>${item.label}</span>
+          <span class="nav-section-arrow">▾</span>
+        </button>
+      `;
+    }
+
+    const isHidden = Boolean(state.collapsedNavSections[currentSection]) && activeSection !== currentSection;
+
+    return `
+      <button class="nav-button ${state.route === item.key ? 'active' : ''} ${isHidden ? 'hidden-by-section' : ''}" data-route="${item.key}">
+        <span class="nav-icon">${item.icon}</span>
+        <span>${item.label}</span>
+      </button>
+    `;
+  }).join('');
 }
 
 function renderView() {
   const view = document.querySelector('#view');
-  const payload = { ...state, isDemo };
+  const payload = {
+    ...state,
+    hoursData: state.route === 'hours' ? getFilteredHoursData() : state.hoursData,
+    hoursFilters: getResolvedHoursFilters(),
+    isDemo
+  };
 
   const views = {
     dashboard: dashboardView(payload),
@@ -239,9 +391,26 @@ function renderView() {
   bindHoursView();
   
   if (state.route === 'map') {
+    window.mapDevicesData = buildMapDevicesData(state.devices);
     console.log('renderView - route is map, scheduling initMap');
     setTimeout(initMap, 500);
   }
+}
+
+function buildMapDevicesData(devices) {
+  return devices
+    .filter(d => d.location && d.location.latitude != null && d.location.longitude != null)
+    .map(d => ({
+      id: d.id,
+      name: d.name || d.id,
+      car: d.car || '',
+      driver: d.driver || '',
+      status: d.status || 'offline',
+      lat: d.location.latitude,
+      lng: d.location.longitude,
+      accuracy: d.location.accuracy || 0,
+      lastUpdate: d.location.timestamp ? new Date(d.location.timestamp).toLocaleString('pt-BR') : '—'
+    }));
 }
 
 const DEFAULT_CENTER = [-22.7391, -47.3304];
@@ -343,9 +512,9 @@ function updateMapMarkers() {
         .addTo(window.mapMarkersLayer)
         .bindPopup(`
           <div style="min-width: 150px;">
-            <strong>${device.name}</strong><br/>
-            <span>${device.car || 'Sem veículo'}</span><br/>
-            <span>${device.driver || 'Sem motorista'}</span><br/>
+            <strong>${escapeHtml(device.name)}</strong><br/>
+            <span>${escapeHtml(device.car || 'Sem veículo')}</span><br/>
+            <span>${escapeHtml(device.driver || 'Sem motorista')}</span><br/>
             <span style="color: ${isOnline ? 'green' : 'gray'}">● ${isOnline ? 'Online' : 'Offline'}</span>
           </div>
         `);
@@ -388,14 +557,27 @@ function bindLogin() {
       hideLoading();
     } catch (error) {
       hideLoading();
-      notice.className = 'notice error';
-      notice.textContent = error.message || 'Não foi possível fazer login.';
+      if (notice) {
+        notice.style.display = 'block';
+        notice.className = 'notice error';
+        notice.textContent = error.message || 'Não foi possível fazer login.';
+      } else {
+        showToast('Erro no login', error.message || 'Não foi possível fazer login.', 'error');
+      }
     }
   });
 }
 
 function bindAppEvents() {
   document.querySelector('#nav')?.addEventListener('click', (event) => {
+    const sectionButton = event.target.closest('[data-nav-section]');
+    if (sectionButton) {
+      const sectionKey = sectionButton.dataset.navSection;
+      state.collapsedNavSections[sectionKey] = !state.collapsedNavSections[sectionKey];
+      renderNav();
+      return;
+    }
+
     const button = event.target.closest('[data-route]');
     if (!button) return;
     state.route = button.dataset.route;
@@ -430,7 +612,7 @@ function bindFileInput() {
   const fileInput = document.getElementById('video-file');
   if (!fileInput) return;
   
-  fileInput.addEventListener('change', (e) => {
+  fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     const container = fileInput.closest('.file-upload');
     const textEl = container.querySelector('.file-text');
@@ -438,6 +620,14 @@ function bindFileInput() {
     if (file) {
       container.classList.add('has-file');
       textEl.textContent = `${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MB)`;
+      try {
+        const duration = await detectVideoDuration(file);
+        if (fileInput.files[0] === file) {
+          textEl.textContent = `${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MB, ${duration})`;
+        }
+      } catch (error) {
+        showToast('Duração não detectada', error.message, 'warning');
+      }
     } else {
       container.classList.remove('has-file');
       textEl.textContent = 'Clique para selecionar um vídeo';
@@ -509,6 +699,43 @@ async function performDelete(type, id, fileId) {
     const deletedPlaylist = type === 'playlist'
       ? state.playlists.find((playlist) => playlist.id === id)
       : null;
+    if (type === 'playlist') {
+      if (hasFirebaseConfig) {
+        await softDeletePlaylistWithAssignments(id, getPlaylistDeviceIds(deletedPlaylist));
+      }
+      await loadData();
+      render();
+      showToast('Excluído', 'Playlist removida com segurança.', 'success');
+      return;
+    }
+
+    if (type !== 'tablet' && type !== 'playlist') {
+      if (hasFirebaseConfig) {
+        const affectedPlaylists = state.playlists
+          .map((playlist) => ({
+            id: playlist.id,
+            videos: toArray(playlist.videos).filter((video) => {
+              const videoId = typeof video === 'string' ? video : video?.id;
+              return videoId !== id;
+            }),
+          }))
+          .filter((playlist) => playlist.videos.length !== toArray(state.playlists.find((item) => item.id === playlist.id)?.videos).length);
+
+        await deleteVideoAndPrunePlaylists(id, affectedPlaylists);
+      }
+      if (fileId && hasAppwriteConfig) {
+        try {
+          await deleteVideoFile(fileId);
+        } catch (storageError) {
+          console.warn('Arquivo de vídeo ficou órfão no Appwrite:', storageError);
+          showToast('Vídeo removido', 'O item saiu da biblioteca, mas o arquivo no Appwrite não pôde ser apagado agora.', 'warning');
+        }
+      }
+      await loadData();
+      render();
+      showToast('Excluído', 'Vídeo removido da biblioteca.', 'success');
+      return;
+    }
     if (type === 'vídeo' && fileId && hasAppwriteConfig) {
       await deleteVideoFile(fileId);
     }
@@ -521,11 +748,6 @@ async function performDelete(type, id, fileId) {
       };
       await deleteDocument(collectionMap[type], id);
 
-      if (type === 'playlist') {
-        for (const deviceId of getPlaylistDeviceIds(deletedPlaylist)) {
-          await unassignPlaylistFromDevice(deviceId, id);
-        }
-      }
     }
 
     await loadData();
@@ -558,15 +780,15 @@ function showEditDeviceModal(deviceId) {
       <form id="edit-device-form">
         <div class="form-group">
           <label>Nome</label>
-          <input class="input" name="name" value="${device.name || ''}" required />
+          <input class="input" name="name" value="${escapeHtml(device.name || '')}" required />
         </div>
         <div class="form-group">
           <label>Veículo</label>
-          <input class="input" name="car" value="${device.car || ''}" />
+          <input class="input" name="car" value="${escapeHtml(device.car || '')}" />
         </div>
         <div class="form-group">
           <label>Motorista</label>
-          <input class="input" name="driver" value="${device.driver || ''}" />
+          <input class="input" name="driver" value="${escapeHtml(device.driver || '')}" />
         </div>
         <div class="modal-actions">
           <button class="button secondary" type="button" id="modal-cancel">Cancelar</button>
@@ -615,9 +837,9 @@ function showEditPlaylistModal(playlistId) {
     const isChecked = currentVideoIds.has(video.id) || currentVideoIds.has(video.title) ? 'checked' : '';
     return `
       <label class="checkbox-item">
-        <input type="checkbox" name="videos" value="${video.id}" ${isChecked} />
+        <input type="checkbox" name="videos" value="${escapeHtml(video.id)}" ${isChecked} />
         <span class="checkbox-box">✓</span>
-        <span class="checkbox-label">${video.title}</span>
+        <span class="checkbox-label">${escapeHtml(video.title)}</span>
       </label>
     `;
   }).join('');
@@ -626,9 +848,9 @@ function showEditPlaylistModal(playlistId) {
     const isChecked = currentDeviceIds.includes(device.id) ? 'checked' : '';
     return `
       <label class="checkbox-item">
-        <input type="checkbox" name="devices" value="${device.id}" ${isChecked} />
+        <input type="checkbox" name="devices" value="${escapeHtml(device.id)}" ${isChecked} />
         <span class="checkbox-box">✓</span>
-        <span class="checkbox-label">${device.name}</span>
+        <span class="checkbox-label">${escapeHtml(device.name)}</span>
       </label>
     `;
   }).join('');
@@ -642,7 +864,7 @@ function showEditPlaylistModal(playlistId) {
       <form id="edit-playlist-form">
         <div class="form-group">
           <label>Nome</label>
-          <input class="input" name="name" value="${playlist.name || ''}" required />
+          <input class="input" name="name" value="${escapeHtml(playlist.name || '')}" required />
         </div>
         <div class="form-group">
           <label>Vídeos</label>
@@ -695,9 +917,7 @@ function showEditPlaylistModal(playlistId) {
 try {
       if (hasFirebaseConfig) {
         console.log('Atualizando playlist:', playlistId, payload);
-        await updatePlaylist(playlistId, payload);
-        console.log('Sincronizando assignments para devices:', selectedDeviceIds);
-        await syncPlaylistAssignments(playlistId, currentDeviceIds, selectedDeviceIds);
+        await updatePlaylistWithAssignments(playlistId, payload, currentDeviceIds, selectedDeviceIds);
       }
       modal.remove();
       await loadData();
@@ -762,19 +982,19 @@ function showConnectDeviceModal(deviceId) {
     <div class="modal">
       <span class="modal-icon info">🔗</span>
       <h3>Conectar Tablet</h3>
-      <p>Configure o dispositivo: <strong>${deviceId}</strong></p>
+      <p>Configure o dispositivo: <strong>${escapeHtml(deviceId)}</strong></p>
       <form id="connect-device-form">
         <div class="form-group">
           <label>Nome do Tablet</label>
-          <input class="input" name="name" value="${existingDevice?.name || ''}" placeholder="Tablet Corolla 01" required />
+          <input class="input" name="name" value="${escapeHtml(existingDevice?.name || '')}" placeholder="Tablet Corolla 01" required />
         </div>
         <div class="form-group">
           <label>Veículo</label>
-          <input class="input" name="car" value="${existingDevice?.car || ''}" placeholder="Toyota Corolla" />
+          <input class="input" name="car" value="${escapeHtml(existingDevice?.car || '')}" placeholder="Toyota Corolla" />
         </div>
         <div class="form-group">
           <label>Motorista</label>
-          <input class="input" name="driver" value="${existingDevice?.driver || ''}" placeholder="João Silva" />
+          <input class="input" name="driver" value="${escapeHtml(existingDevice?.driver || '')}" placeholder="João Silva" />
         </div>
         <div class="modal-actions">
           <button class="button secondary" type="button" id="modal-cancel">Cancelar</button>
@@ -806,8 +1026,7 @@ function showConnectDeviceModal(deviceId) {
       showLoading('Conectando...');
 
       if (hasFirebaseConfig) {
-        await updateDevice(deviceId, payload);
-        await approveConnectionRequest(deviceId, { approvedBy: state.user?.email || 'admin' });
+        await approveConnectionWithDevice(deviceId, payload, { approvedBy: state.user?.email || 'admin' });
       }
 
       modal.remove();
@@ -831,18 +1050,23 @@ function bindVideoForm() {
     event.preventDefault();
     const formData = new FormData(form);
     const file = formData.get('file');
-    const payload = {
-      title: String(formData.get('title')).trim(),
-      duration: String(formData.get('duration')).trim(),
-      status: String(formData.get('status')).trim(),
-    };
+    if (!(file instanceof File) || !file.name || file.size <= 0) {
+      showToast('Arquivo obrigatório', 'Selecione um vídeo antes de enviar.', 'warning');
+      return;
+    }
 
     try {
       showLoading('Enviando vídeo...');
+      const duration = await detectVideoDuration(file);
+      const payload = {
+        title: String(formData.get('title')).trim(),
+        duration,
+        status: 'Ativo',
+      };
       
       let uploadedMeta = {
-        fileName: file?.name || 'arquivo.mp4',
-        size: file ? `${Math.round(file.size / (1024 * 1024))} MB` : '—',
+        fileName: file.name,
+        size: `${Math.round(file.size / (1024 * 1024))} MB`,
       };
 
       if (hasAppwriteConfig && file) {
@@ -900,8 +1124,7 @@ function bindPlaylistForm() {
       showLoading('Salvando playlist...');
       
       if (hasFirebaseConfig) {
-        const playlistId = await addPlaylist(payload);
-        await syncPlaylistAssignments(playlistId, [], selectedDeviceIds);
+        await addPlaylistWithAssignments(payload, selectedDeviceIds);
       }
       
       hideLoading();
@@ -965,6 +1188,7 @@ function setupRealtimeListeners() {
 
   const unsubHours = subscribeToHours((hoursData) => {
     console.log('Horas recebidas do Firebase:', hoursData);
+    state.allHoursData = hoursData;
     state.hoursData = hoursData;
     if (state.route === 'hours') {
       render();
@@ -984,17 +1208,7 @@ function updateDeviceStatusUI(devices) {
   if (!view) return;
 
   if (state.route === 'map') {
-    window.mapDevicesData = devices.filter(d => d.location && d.location.latitude != null && d.location.longitude != null).map(d => ({
-      id: d.id,
-      name: d.name || d.id,
-      car: d.car || '',
-      driver: d.driver || '',
-      status: d.status || 'offline',
-      lat: d.location.latitude,
-      lng: d.location.longitude,
-      accuracy: d.location.accuracy || 0,
-      lastUpdate: d.location.timestamp ? new Date(d.location.timestamp).toLocaleString('pt-BR') : '—'
-    }));
+    window.mapDevicesData = buildMapDevicesData(devices);
     
     console.log('updateDeviceStatusUI - map data updated, scheduling initMap');
     setTimeout(initMap, 500);
@@ -1002,13 +1216,13 @@ function updateDeviceStatusUI(devices) {
   }
 
   devices.forEach(device => {
-    const row = view.querySelector(`[data-device-id="${device.id}"]`);
+    const row = view.querySelector(`[data-device-id="${escapeCssValue(device.id)}"]`);
     if (row) {
       const statusEl = row.querySelector('.status');
       if (statusEl) {
         const statusText = device.status === 'online' ? 'Ativo' : 'Parado';
         statusEl.textContent = statusText;
-        statusEl.className = `status ${device.status || 'offline'}`;
+        statusEl.className = `status ${safeCssClass(device.status, 'offline')}`;
       }
     }
   });
@@ -1025,21 +1239,18 @@ async function bindHoursView() {
   const filterDevice = document.getElementById('filter-device');
   const exportBtn = document.getElementById('export-hours-btn');
 
-  filterDateStart.style.display = 'none';
-  filterDateEnd.style.display = 'none';
+  if (!filterDateStart || !filterDateEnd) return;
+
+  const updateCustomDateVisibility = () => {
+    const display = filterPeriod?.value === 'custom' ? 'inline-block' : 'none';
+    filterDateStart.style.display = display;
+    filterDateEnd.style.display = display;
+  };
+  updateCustomDateVisibility();
 
   if (filterPeriod) {
     filterPeriod.addEventListener('change', async (e) => {
-      const period = e.target.value;
-      
-      if (period === 'custom') {
-        filterDateStart.style.display = 'inline-block';
-        filterDateEnd.style.display = 'inline-block';
-      } else {
-        filterDateStart.style.display = 'none';
-        filterDateEnd.style.display = 'none';
-      }
-
+      updateCustomDateVisibility();
       await applyHoursFilter();
     });
   }
@@ -1055,9 +1266,9 @@ async function bindHoursView() {
 
   if (exportBtn) {
     exportBtn.addEventListener('click', async () => {
-      const data = await exportHoursToExcel(state.hoursData, state.devices);
+      const data = await exportHoursToExcel(getFilteredHoursData(), state.devices);
       if (data && data.length > 0) {
-        const timestamp = new Date().toISOString().split('T')[0];
+        const timestamp = getLocalDateString();
         exportToExcel({ hoursReport: data }, `relatorio-horas-${timestamp}`);
         showToast('Relatório Exportado', 'O arquivo Excel foi baixado com sucesso.', 'success');
       } else {
@@ -1089,70 +1300,18 @@ async function applyHoursFilter() {
 
   if (!filterPeriod) return;
 
-  const period = filterPeriod.value;
-  const deviceId = filterDevice?.value || '';
-  const today = new Date().toISOString().split('T')[0];
-
-  let startDate, endDate;
-
-  const getLocalDate = () => {
-    const d = new Date();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+  state.hoursFilters = {
+    period: filterPeriod.value,
+    deviceId: filterDevice?.value || '',
+    startDate: filterDateStart?.value || '',
+    endDate: filterDateEnd?.value || '',
   };
 
-  switch (period) {
-    case 'today':
-      startDate = endDate = getLocalDate();
-      break;
-    case 'week':
-      const weekAgo = new Date();
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      const wYear = weekAgo.getFullYear();
-      const wMonth = String(weekAgo.getMonth() + 1).padStart(2, '0');
-      const wDay = String(weekAgo.getDate()).padStart(2, '0');
-      startDate = `${wYear}-${wMonth}-${wDay}`;
-      endDate = getLocalDate();
-      break;
-    case 'month':
-      const year = new Date().getFullYear();
-      const month = new Date().getMonth() + 1;
-      startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-      const lastDay = new Date(year, month, 0).getDate();
-      endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-      break;
-    case 'custom':
-      startDate = filterDateStart?.value || getLocalDate();
-      endDate = filterDateEnd?.value || getLocalDate();
-      break;
-    default:
-      startDate = getLocalDate();
-      endDate = getLocalDate();
+  if (state.allHoursData.length === 0) {
+    const localToday = getLocalDateString();
+    state.allHoursData = await fetchHoursByDateRange(localToday, localToday);
   }
 
-  console.log('Filtrando:', { period, deviceId, startDate, endDate });
-  console.log('state.hoursData atual:', state.hoursData.length);
-
-  let allHours = state.hoursData;
-  if (allHours.length === 0) {
-    const localToday = getLocalDate();
-    allHours = await fetchHoursByDateRange(localToday, localToday);
-  }
-  console.log('horas disponíveis para filtro:', allHours.length);
-
-  let filteredData = allHours.filter(h => {
-    const date = h.date || '';
-    console.log('data no registro:', date, 'startDate:', startDate, 'endDate:', endDate, 'comparação:', date >= startDate && date <= endDate);
-    const inDateRange = date >= startDate && date <= endDate;
-    const matchesDevice = !deviceId || h.deviceId === deviceId;
-    return inDateRange && matchesDevice;
-  });
-
-  console.log('Dados filtrados:', filteredData.length);
-
-  state.hoursData = filteredData;
   render();
 }
 

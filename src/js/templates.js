@@ -18,6 +18,7 @@ export function loginTemplate() {
               <input class="input" name="password" type="password" placeholder="••••••••" required />
             </div>
             <button class="button primary" type="submit" style="width: 100%;">Entrar</button>
+            <div id="login-notice" class="notice error" style="display:none;margin-top:16px;"></div>
           </form>
         </div>
       </div>

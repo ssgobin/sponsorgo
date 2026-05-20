@@ -2,6 +2,31 @@ import { layoutView } from './templates.js';
 import { exportToExcel } from './export-excel.js';
 import { DAILY_GOAL_HOURS } from './firebase-hours.js';
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value);
+}
+
+function safeCssClass(value, fallback = '') {
+  const text = String(value ?? fallback);
+  return /^[a-z0-9_-]+$/i.test(text) ? text : fallback;
+}
+
+function getLocalDateString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function formatDate(timestamp) {
   if (!timestamp) return '—';
   if (typeof timestamp === 'string') return timestamp;
@@ -85,16 +110,16 @@ export function dashboardView(data) {
       ? (device.lastHeartbeat.toDate ? device.lastHeartbeat.toDate() : new Date(device.lastHeartbeat))
       : null;
     return `
-    <tr data-device-id="${device.id}">
-      <td><strong>${device.name || '—'}</strong><div class="card-subtitle">${device.id || '—'}</div></td>
-      <td>${device.car || '—'}</td>
-      <td><span class="status ${device.status || 'offline'}">${formatDeviceStatus(device.status)}</span></td>
-      <td>${getVideoTitle(device.currentVideoId) || device.currentVideo || '—'}</td>
+    <tr data-device-id="${escapeAttr(device.id)}">
+      <td><strong>${escapeHtml(device.name || '—')}</strong><div class="card-subtitle">${escapeHtml(device.id || '—')}</div></td>
+      <td>${escapeHtml(device.car || '—')}</td>
+      <td><span class="status ${safeCssClass(device.status, 'offline')}">${formatDeviceStatus(device.status)}</span></td>
+      <td>${escapeHtml(getVideoTitle(device.currentVideoId) || device.currentVideo || '—')}</td>
       <td>${formatDate(lastContact) || '—'}</td>
       <td>${device.battery >= 0 ? `${device.battery}%` : '—'}</td>
       <td style="width:80px;">
-        <button class="button-edit" data-edit="tablet" data-id="${device.id}" title="Editar">✎</button>
-        <button class="button-delete" data-delete="tablet" data-id="${device.id}" title="Excluir">✕</button>
+        <button class="button-edit" data-edit="tablet" data-id="${escapeAttr(device.id)}" title="Editar">✎</button>
+        <button class="button-delete" data-delete="tablet" data-id="${escapeAttr(device.id)}" title="Excluir">✕</button>
       </td>
     </tr>
   `}).join('');
@@ -102,10 +127,10 @@ export function dashboardView(data) {
   const activities = activity.length > 0 ? activity.map((item) => `
     <div class="list-item">
       <div>
-        <p class="list-item-title">${item.title || '—'}</p>
-        <p class="list-item-subtitle">${item.detail || '—'}</p>
+        <p class="list-item-title">${escapeHtml(item.title || '—')}</p>
+        <p class="list-item-subtitle">${escapeHtml(item.detail || '—')}</p>
       </div>
-      <span class="pill">${item.when || '—'}</span>
+      <span class="pill">${escapeHtml(item.when || '—')}</span>
     </div>
   `).join('') : '<div class="empty-state"><h3>Nenhuma atividade recente</h3><p>As atividades vão aparecer aqui quando os tablets interagirem.</p></div>';
 
@@ -168,17 +193,18 @@ export function dashboardView(data) {
 }
 
 export function devicesView(data) {
+  const allowManualDeviceForm = Boolean(data.isDemo);
   const items = data.devices.length > 0 ? data.devices.map((device) => `
-    <div class="list-item" data-device-id="${device.id}">
+    <div class="list-item" data-device-id="${escapeAttr(device.id)}">
       <div>
-        <p class="list-item-title">${device.name || '—'}</p>
-        <p class="list-item-subtitle">${device.id || '—'} • ${device.car || 'Sem veículo'} • ${device.driver || 'Sem motorista'}</p>
+        <p class="list-item-title">${escapeHtml(device.name || '—')}</p>
+        <p class="list-item-subtitle">${escapeHtml(device.id || '—')} • ${escapeHtml(device.car || 'Sem veículo')} • ${escapeHtml(device.driver || 'Sem motorista')}</p>
       </div>
       <div class="row wrap" style="align-items:center;gap:8px;">
-        <span class="status ${device.status || 'offline'}">${formatDeviceStatus(device.status)}</span>
+        <span class="status ${safeCssClass(device.status, 'offline')}">${formatDeviceStatus(device.status)}</span>
         ${device.battery ? `<span class="pill">${device.battery}% bateria</span>` : ''}
-        <button class="button-edit" data-edit="tablet" data-id="${device.id}" title="Editar">✎</button>
-        <button class="button-delete" data-delete="tablet" data-id="${device.id}" title="Excluir">✕</button>
+        <button class="button-edit" data-edit="tablet" data-id="${escapeAttr(device.id)}" title="Editar">✎</button>
+        <button class="button-delete" data-delete="tablet" data-id="${escapeAttr(device.id)}" title="Excluir">✕</button>
       </div>
     </div>
   `).join('') : '';
@@ -195,7 +221,13 @@ export function devicesView(data) {
               <p class="card-subtitle">Dê um nome e identificação para cada tablet</p>
             </div>
           </div>
-          <form id="device-form" class="list">
+          ${allowManualDeviceForm ? '' : `
+            <div class="empty-state">
+              <h3>Use Conexões</h3>
+              <p>Abra o app SponsorGo no tablet e aprove a solicitação na aba Conexões. Assim o ID fica igual ao que o app Kotlin usa.</p>
+            </div>
+          `}
+          <form id="device-form" class="list" style="${allowManualDeviceForm ? '' : 'display:none;'}">
             <div class="form-row">
               <div class="form-group">
                 <label>Nome do Tablet</label>
@@ -243,12 +275,12 @@ export function videosView(data) {
   const items = data.videos.length > 0 ? data.videos.map((video) => `
     <div class="list-item">
       <div>
-        <p class="list-item-title">${video.title || '—'}</p>
-        <p class="list-item-subtitle">${video.fileName || 'arquivo.mp4'} • ${video.duration || '00:00'} • ${video.size || '—'}</p>
+        <p class="list-item-title">${escapeHtml(video.title || '—')}</p>
+        <p class="list-item-subtitle">${escapeHtml(video.fileName || 'arquivo.mp4')} • ${escapeHtml(video.duration || '00:00')} • ${escapeHtml(video.size || '—')}</p>
       </div>
       <div class="row wrap" style="align-items:center;gap:8px;">
-        <span class="pill ${video.status === 'Ativo' || video.status === 'active' ? 'active' : ''}">${video.status || 'Rascunho'}</span>
-        <button class="button-delete" data-delete="vídeo" data-id="${video.id}" data-file-id="${video.fileId || ''}" title="Excluir">✕</button>
+        <span class="pill ${video.status === 'Ativo' || video.status === 'active' ? 'active' : ''}">${escapeHtml(video.status || 'Rascunho')}</span>
+        <button class="button-delete" data-delete="vídeo" data-id="${escapeAttr(video.id)}" data-file-id="${escapeAttr(video.fileId || '')}" title="Excluir">✕</button>
       </div>
     </div>
   `).join('') : '';
@@ -266,27 +298,16 @@ export function videosView(data) {
             </div>
           </div>
           <form id="video-form" class="list">
-            <div class="form-row three">
+            <div class="form-row">
               <div class="form-group">
                 <label>Título do Vídeo</label>
                 <input class="input" name="title" placeholder="Promo Abril 01" required />
-              </div>
-              <div class="form-group">
-                <label>Duração</label>
-                <input class="input" name="duration" placeholder="00:30" required />
-              </div>
-              <div class="form-group">
-                <label>Status</label>
-                <select class="select" name="status">
-                  <option value="Ativo">Ativo</option>
-                  <option value="Rascunho">Rascunho</option>
-                </select>
               </div>
             </div>
             <div class="form-group">
               <label>Arquivo do Vídeo</label>
               <div class="file-upload">
-                <input class="file-input" name="file" type="file" accept="video/*" id="video-file" />
+                <input class="file-input" name="file" type="file" accept="video/*" id="video-file" required />
                 <label for="video-file" class="file-label">
                   <span class="file-icon">📁</span>
                   <span class="file-text" id="file-name">Clique para selecionar um vídeo</span>
@@ -322,13 +343,13 @@ export function playlistsView(data) {
   const items = data.playlists.length > 0 ? data.playlists.map((playlist) => `
     <div class="list-item">
       <div>
-        <p class="list-item-title">${playlist.name || '—'}</p>
+        <p class="list-item-title">${escapeHtml(playlist.name || '—')}</p>
         <p class="list-item-subtitle">${playlist.videos?.length || playlist.videos || 0} vídeos • ${playlist.devices?.length || playlist.devices || 0} tablets • ${formatDate(playlist.updatedAt)}</p>
       </div>
       <div class="row wrap" style="align-items:center;gap:8px;">
-        <span class="pill ${playlist.status === 'Ativa' || playlist.status === 'active' ? 'active' : ''}">${playlist.status || 'Inativa'}</span>
-        <button class="button-edit" data-edit="playlist" data-id="${playlist.id}" title="Editar">✎</button>
-        <button class="button-delete" data-delete="playlist" data-id="${playlist.id}" title="Excluir">✕</button>
+        <span class="pill ${playlist.status === 'Ativa' || playlist.status === 'active' ? 'active' : ''}">${escapeHtml(playlist.status || 'Inativa')}</span>
+        <button class="button-edit" data-edit="playlist" data-id="${escapeAttr(playlist.id)}" title="Editar">✎</button>
+        <button class="button-delete" data-delete="playlist" data-id="${escapeAttr(playlist.id)}" title="Excluir">✕</button>
       </div>
     </div>
   `).join('') : '';
@@ -355,9 +376,9 @@ export function playlistsView(data) {
               <div class="checkbox-list">
                 ${data.videos.length > 0 ? data.videos.map((video) => `
                   <label class="checkbox-item">
-                    <input type="checkbox" name="videos" value="${video.id || video.title}" />
+                    <input type="checkbox" name="videos" value="${escapeAttr(video.id || video.title)}" />
                     <span class="checkbox-box">✓</span>
-                    <span class="checkbox-label">${video.title}</span>
+                    <span class="checkbox-label">${escapeHtml(video.title)}</span>
                   </label>
                 `).join('') : '<p class="text-muted">Nenhum vídeo disponível</p>'}
               </div>
@@ -367,9 +388,9 @@ export function playlistsView(data) {
               <div class="checkbox-list">
                 ${data.devices.length > 0 ? data.devices.map((device) => `
                   <label class="checkbox-item">
-                    <input type="checkbox" name="devices" value="${device.id || device.name}" />
+                    <input type="checkbox" name="devices" value="${escapeAttr(device.id || device.name)}" />
                     <span class="checkbox-box">✓</span>
-                    <span class="checkbox-label">${device.name}</span>
+                    <span class="checkbox-label">${escapeHtml(device.name)}</span>
                   </label>
                 `).join('') : '<p class="text-muted">Nenhum tablet disponível</p>'}
               </div>
@@ -411,13 +432,13 @@ export function monitorView(data) {
       ? (device.lastHeartbeat.toDate ? device.lastHeartbeat.toDate() : new Date(device.lastHeartbeat))
       : null;
     return `
-    <tr data-device-id="${device.id}">
-      <td><strong>${device.name || '—'}</strong></td>
-      <td><span class="status ${device.status || 'offline'}">${formatDeviceStatus(device.status)}</span></td>
-      <td>${getVideoTitle(device.currentVideoId) || device.currentVideo || '—'}</td>
+    <tr data-device-id="${escapeAttr(device.id)}">
+      <td><strong>${escapeHtml(device.name || '—')}</strong></td>
+      <td><span class="status ${safeCssClass(device.status, 'offline')}">${formatDeviceStatus(device.status)}</span></td>
+      <td>${escapeHtml(getVideoTitle(device.currentVideoId) || device.currentVideo || '—')}</td>
       <td>${formatDate(lastContact) || '—'}</td>
       <td>${device.battery >= 0 ? `${device.battery}%` : '—'}</td>
-      <td style="width:50px;"><button class="button-edit" data-edit="tablet" data-id="${device.id}" title="Editar">✎</button></td>
+      <td style="width:50px;"><button class="button-edit" data-edit="tablet" data-id="${escapeAttr(device.id)}" title="Editar">✎</button></td>
     </tr>
   `}).join('') : '';
 
@@ -490,18 +511,6 @@ export function monitorView(data) {
 export function mapView(data) {
   const devicesWithLocation = data.devices.filter(d => d.location && d.location.latitude != null && d.location.longitude != null);
   
-  const devicesJson = JSON.stringify(devicesWithLocation.map(d => ({
-    id: d.id,
-    name: d.name || d.id,
-    car: d.car || '',
-    driver: d.driver || '',
-    status: d.status || 'offline',
-    lat: d.location.latitude,
-    lng: d.location.longitude,
-    accuracy: d.location.accuracy || 0,
-    lastUpdate: d.location.timestamp ? new Date(d.location.timestamp).toLocaleString('pt-BR') : '—'
-  })));
-
   return layoutView(
     'Mapa',
     'Visualize a localização dos tablets em tempo real.',
@@ -532,9 +541,6 @@ export function mapView(data) {
           </div>
         </article>
       </section>
-      <script>
-        window.mapDevicesData = ${devicesJson};
-      </script>
     `,
     '<button class="button ghost" data-action="logout">Sair</button>'
   );
@@ -614,8 +620,8 @@ export function settingsView(data, isDemo) {
 }
 
 export function hoursView(data) {
-  const { devices, hoursData, alerts } = data;
-  const today = new Date().toISOString().split('T')[0];
+  const { devices, hoursData, allHoursData = hoursData, alerts, hoursFilters = {} } = data;
+  const today = getLocalDateString();
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1;
   const currentDay = String(new Date().getDate()).padStart(2, '0');
@@ -640,6 +646,18 @@ export function hoursView(data) {
   
   const onlineDevices = devices.filter(d => d.status === 'online').length;
   const devicesBelowGoal = alerts?.length || 0;
+  const deviceOptions = [
+    ...devices.map(device => ({
+      id: device.id,
+      label: device.name || device.id,
+    })),
+    ...allHoursData
+      .filter(record => record.deviceId && !devices.some(device => device.id === record.deviceId))
+      .map(record => ({
+        id: record.deviceId,
+        label: record.deviceId,
+      })),
+  ].filter((device, index, list) => device.id && list.findIndex(item => item.id === device.id) === index);
 
   const hourRows = hoursData.map((record) => {
     const device = devices.find(d => d.id === record.deviceId);
@@ -650,10 +668,10 @@ export function hoursView(data) {
     
     return `
     <tr>
-      <td>${record.date || '—'}</td>
-      <td><strong>${device?.name || record.deviceId || '—'}</strong></td>
-      <td>${device?.car || '—'}</td>
-      <td>${device?.driver || '—'}</td>
+      <td>${escapeHtml(record.date || '—')}</td>
+      <td><strong>${escapeHtml(device?.name || record.deviceId || '—')}</strong></td>
+      <td>${escapeHtml(device?.car || '—')}</td>
+      <td>${escapeHtml(device?.driver || '—')}</td>
       <td class="hours-cell">${formatHours(driving)}</td>
       <td class="hours-cell">${formatHours(propaganda)}</td>
       <td class="percentage-cell">${percentage}%</td>
@@ -666,11 +684,11 @@ export function hoursView(data) {
       <div class="alert-content">
         <span class="alert-icon">⚠</span>
         <div class="alert-text">
-          <strong>${alert.driver || 'Motorista'}</strong> não rodou ${alert.difference?.toFixed(1) || '0'} horas
+          <strong>${escapeHtml(alert.driver || 'Motorista')}</strong> não rodou ${alert.difference?.toFixed(1) || '0'} horas
           <span class="alert-detail">(Meta: ${DAILY_GOAL_HOURS}h, Rodou: ${alert.drivingHours?.toFixed(1) || '0'}h)</span>
         </div>
       </div>
-      <button class="button small" data-dismiss-alert="${alert.id}">Dispensar</button>
+      <button class="button small" data-dismiss-alert="${escapeAttr(alert.id)}">Dispensar</button>
     </div>
   `).join('') || '<p class="text-muted">Nenhum alerta pendente</p>';
 
@@ -729,16 +747,16 @@ export function hoursView(data) {
           </div>
           <div class="filter-controls">
             <select id="filter-period" class="select">
-              <option value="today">Hoje</option>
-              <option value="week">Última semana</option>
-              <option value="month">Este mês</option>
-              <option value="custom">Personalizado</option>
+              <option value="today" ${hoursFilters.period === 'today' ? 'selected' : ''}>Hoje</option>
+              <option value="week" ${hoursFilters.period === 'week' ? 'selected' : ''}>Última semana</option>
+              <option value="month" ${hoursFilters.period === 'month' ? 'selected' : ''}>Este mês</option>
+              <option value="custom" ${hoursFilters.period === 'custom' ? 'selected' : ''}>Personalizado</option>
             </select>
-            <input type="date" id="filter-date-start" class="input" value="${today}" />
-            <input type="date" id="filter-date-end" class="input" value="${today}" />
+            <input type="date" id="filter-date-start" class="input" value="${escapeAttr(hoursFilters.startDate || today)}" />
+            <input type="date" id="filter-date-end" class="input" value="${escapeAttr(hoursFilters.endDate || today)}" />
             <select id="filter-device" class="select">
               <option value="">Todos os tablets</option>
-              ${devices.map(d => `<option value="${d.id}">${d.name || d.id}</option>`).join('')}
+              ${deviceOptions.map(d => `<option value="${escapeAttr(d.id)}" ${hoursFilters.deviceId === d.id ? 'selected' : ''}>${escapeHtml(d.label)}</option>`).join('')}
             </select>
             <button class="button primary" id="export-hours-btn">Exportar Excel</button>
           </div>
@@ -809,12 +827,12 @@ export function connectionsView(data) {
     return `
       <div class="connection-card" style="background: #1a1a2e; padding: 16px; margin-bottom: 12px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #333;">
         <div>
-          <h4 style="margin: 0 0 8px; color: #00ff00;">${request.deviceId}</h4>
+          <h4 style="margin: 0 0 8px; color: #00ff00;">${escapeHtml(request.deviceId)}</h4>
           <p style="margin: 0; color: #aaa; font-size: 13px;">
             Solicitado: ${formatDate(request.createdAt)}
           </p>
         </div>
-        <button class="button primary" data-connect="${request.deviceId}" ${existingDevice && existingDevice.name ? 'disabled' : ''}>
+        <button class="button primary" data-connect="${escapeAttr(request.deviceId)}" ${existingDevice && existingDevice.name ? 'disabled' : ''}>
           ${existingDevice && existingDevice.name ? 'Já conectado' : 'Conectar'}
         </button>
       </div>
@@ -824,10 +842,10 @@ export function connectionsView(data) {
   const connectedDevices = devices.filter(d => d.name && d.createdAt);
 
   const connectedRows = connectedDevices.map(device => `
-    <div class="list-item" data-device-id="${device.id}">
+    <div class="list-item" data-device-id="${escapeAttr(device.id)}">
       <div>
-        <p class="list-item-title">${device.name || '—'}</p>
-        <p class="list-item-subtitle">${device.id} • ${device.car || 'Sem veículo'} • ${device.driver || 'Sem motorista'}</p>
+        <p class="list-item-title">${escapeHtml(device.name || '—')}</p>
+        <p class="list-item-subtitle">${escapeHtml(device.id)} • ${escapeHtml(device.car || 'Sem veículo')} • ${escapeHtml(device.driver || 'Sem motorista')}</p>
       </div>
       <span class="pill active">Conectado</span>
     </div>

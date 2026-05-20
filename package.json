@@ -10,8 +10,7 @@
   },
   "dependencies": {
     "appwrite": "^17.0.0",
-    "firebase": "^11.6.1",
-    "xlsx": "^0.18.5"
+    "firebase": "^11.6.1"
   },
   "devDependencies": {
     "vite": "^7.1.3"

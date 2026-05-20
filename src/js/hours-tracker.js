@@ -2,6 +2,13 @@ const HOURS_COLLECTION = 'hoursTracking';
 const ALERTS_COLLECTION = 'hoursAlerts';
 const DAILY_GOAL_HOURS = 8;
 
+function getLocalDateString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 class HoursTracker {
   constructor(deviceId) {
     this.deviceId = deviceId;
@@ -105,7 +112,7 @@ class HoursTracker {
     if (typeof firebase !== 'undefined' && firebase.firestore) {
       try {
         const db = firebase.firestore();
-        const today = new Date().toISOString().split('T')[0];
+        const today = getLocalDateString();
         
         const docRef = db.collection(HOURS_COLLECTION).doc(`${this.deviceId}_${today}`);
         
@@ -139,7 +146,7 @@ class HoursTracker {
   }
 
   getStats() {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateString();
     return {
       deviceId: this.deviceId,
       date: today,

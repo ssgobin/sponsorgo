@@ -21,6 +21,13 @@ const DAILY_GOAL_HOURS = 8;
 
 let db = firebaseDb;
 
+function getLocalDateString(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export function initHoursFirebase(firestoreDb) {
   if (firestoreDb) {
     db = firestoreDb;
@@ -101,7 +108,7 @@ export async function fetchHoursByDevice(deviceId, startDate, endDate) {
 }
 
 export async function fetchTodayHours() {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getLocalDateString();
   return fetchHoursByDateRange(today, today);
 }
 
@@ -173,7 +180,7 @@ export async function dismissAlert(alertId) {
 export async function checkAndCreateAlerts(devices, hoursData) {
   if (!db || !hasFirebaseConfig) return [];
   
-  const today = new Date().toISOString().split('T')[0];
+  const today = getLocalDateString();
   const alerts = [];
   
   for (const device of devices) {

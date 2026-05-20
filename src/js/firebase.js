@@ -15,6 +15,7 @@ import {
   where,
   onSnapshot,
   updateDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { firebaseConfig as fbConfig } from './config.js';
 
@@ -53,6 +54,95 @@ export async function addPlaylist(payload) {
   const ref = doc(collection(db, 'playlists'));
   await setDoc(ref, { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
   return ref.id;
+}
+
+export async function addPlaylistWithAssignments(payload, selectedDeviceIds = []) {
+  if (!db) throw new Error('Firebase não configurado.');
+  const playlistRef = doc(collection(db, 'playlists'));
+  const batch = writeBatch(db);
+
+  batch.set(playlistRef, {
+    ...payload,
+    devices: selectedDeviceIds,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  selectedDeviceIds.forEach((deviceId) => {
+    batch.set(doc(db, 'deviceAssignments', deviceId), {
+      playlistId: playlistRef.id,
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  await batch.commit();
+  return playlistRef.id;
+}
+
+export async function updatePlaylistWithAssignments(playlistId, payload, previousDeviceIds = [], selectedDeviceIds = []) {
+  if (!db) throw new Error('Firebase não configurado.');
+  const batch = writeBatch(db);
+  const selected = new Set(selectedDeviceIds);
+
+  batch.set(doc(db, 'playlists', playlistId), {
+    ...payload,
+    devices: selectedDeviceIds,
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+
+  selectedDeviceIds.forEach((deviceId) => {
+    batch.set(doc(db, 'deviceAssignments', deviceId), {
+      playlistId,
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  previousDeviceIds.forEach((deviceId) => {
+    if (!selected.has(deviceId)) {
+      batch.delete(doc(db, 'deviceAssignments', deviceId));
+    }
+  });
+
+  await batch.commit();
+  return playlistId;
+}
+
+export async function softDeletePlaylistWithAssignments(playlistId, deviceIds = []) {
+  if (!db) throw new Error('Firebase não configurado.');
+  const batch = writeBatch(db);
+
+  batch.set(doc(db, 'playlists', playlistId), {
+    deletedAt: serverTimestamp(),
+    status: 'Excluída',
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+
+  deviceIds.forEach((deviceId) => {
+    batch.delete(doc(db, 'deviceAssignments', deviceId));
+  });
+
+  await batch.commit();
+}
+
+export async function deleteVideoMetadata(videoId) {
+  if (!db) throw new Error('Firebase não configurado.');
+  await deleteDoc(doc(db, 'videos', videoId));
+}
+
+export async function deleteVideoAndPrunePlaylists(videoId, affectedPlaylists = []) {
+  if (!db) throw new Error('Firebase não configurado.');
+  const batch = writeBatch(db);
+
+  batch.delete(doc(db, 'videos', videoId));
+
+  affectedPlaylists.forEach((playlist) => {
+    batch.set(doc(db, 'playlists', playlist.id), {
+      videos: playlist.videos,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  });
+
+  await batch.commit();
 }
 
 export async function fetchCollection(name, includeDeleted = false) {
@@ -152,6 +242,24 @@ export async function approveConnectionRequest(deviceId, payload) {
     approvedAt: serverTimestamp(),
     approvedBy: payload.approvedBy || 'admin',
   }, { merge: true });
+}
+
+export async function approveConnectionWithDevice(deviceId, devicePayload, approvalPayload = {}) {
+  if (!db) throw new Error('Firebase não configurado.');
+  const batch = writeBatch(db);
+
+  batch.set(doc(db, 'devices', deviceId), {
+    ...devicePayload,
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+
+  batch.set(doc(db, 'connectionRequests', deviceId), {
+    status: 'approved',
+    approvedAt: serverTimestamp(),
+    approvedBy: approvalPayload.approvedBy || 'admin',
+  }, { merge: true });
+
+  await batch.commit();
 }
 
 export async function rejectConnectionRequest(deviceId) {
