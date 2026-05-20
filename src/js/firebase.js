@@ -60,7 +60,6 @@ export async function addPlaylistWithAssignments(payload, selectedDeviceIds = []
   if (!db) throw new Error('Firebase não configurado.');
   const playlistRef = doc(collection(db, 'playlists'));
   const batch = writeBatch(db);
-
   batch.set(playlistRef, {
     ...payload,
     devices: selectedDeviceIds,
@@ -108,7 +107,28 @@ export async function updatePlaylistWithAssignments(playlistId, payload, previou
 }
 
 export async function softDeletePlaylistWithAssignments(playlistId, deviceIds = []) {
-  if (!db) throw new Error('Firebase não configurado.');
+  if (!db) throw new Error('Firebase nao configurado.');
+  const assignmentDeviceIds = new Set(deviceIds.filter(Boolean));
+  const playlistSnap = await getDoc(doc(db, 'playlists', playlistId));
+
+  if (playlistSnap.exists()) {
+    const playlistDevices = playlistSnap.get('devices');
+    if (Array.isArray(playlistDevices)) {
+      playlistDevices.forEach((device) => {
+        const deviceId = typeof device === 'string' ? device : device?.id;
+        if (deviceId) assignmentDeviceIds.add(deviceId);
+      });
+    }
+  }
+
+  const assignmentsSnap = await getDocs(query(
+    collection(db, 'deviceAssignments'),
+    where('playlistId', '==', playlistId)
+  ));
+
+  assignmentsSnap.docs.forEach((assignment) => {
+    assignmentDeviceIds.add(assignment.id);
+  });
   const batch = writeBatch(db);
 
   batch.set(doc(db, 'playlists', playlistId), {
@@ -117,7 +137,7 @@ export async function softDeletePlaylistWithAssignments(playlistId, deviceIds = 
     updatedAt: serverTimestamp(),
   }, { merge: true });
 
-  deviceIds.forEach((deviceId) => {
+  assignmentDeviceIds.forEach((deviceId) => {
     batch.delete(doc(db, 'deviceAssignments', deviceId));
   });
 

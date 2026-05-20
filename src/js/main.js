@@ -165,6 +165,10 @@ function getPlaylistVideoIds(playlist) {
     .filter(Boolean);
 }
 
+function getPlaylistVideoId(video) {
+  return typeof video === 'string' ? video : (video?.id || video?.title || video?.name || video?.fileId || '');
+}
+
 function getPlaylistDeviceIds(playlist) {
   return toArray(playlist?.devices)
     .map((device) => typeof device === 'string' ? device : (device?.id || device?.name || ''))
@@ -711,13 +715,17 @@ async function performDelete(type, id, fileId) {
 
     if (type !== 'tablet' && type !== 'playlist') {
       if (hasFirebaseConfig) {
+        const deletedVideo = state.videos.find((video) => video.id === id);
+        const deletedVideoKeys = new Set([
+          id,
+          deletedVideo?.title,
+          deletedVideo?.name,
+          deletedVideo?.fileId,
+        ].filter(Boolean));
         const affectedPlaylists = state.playlists
           .map((playlist) => ({
             id: playlist.id,
-            videos: toArray(playlist.videos).filter((video) => {
-              const videoId = typeof video === 'string' ? video : video?.id;
-              return videoId !== id;
-            }),
+            videos: toArray(playlist.videos).filter((video) => !deletedVideoKeys.has(getPlaylistVideoId(video))),
           }))
           .filter((playlist) => playlist.videos.length !== toArray(state.playlists.find((item) => item.id === playlist.id)?.videos).length);
 
