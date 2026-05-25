@@ -12,3 +12,7 @@ export const appwriteConfig = {
   projectId: 'SEU_PROJECT_ID',
   bucketId: 'SEU_BUCKET_ID',
 };
+
+export const discordConfig = {
+  webhookUrl: 'SUA_DISCORD_WEBHOOK_URL',
+};

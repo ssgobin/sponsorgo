@@ -14,6 +14,7 @@ import {
   deleteField
 } from 'firebase/firestore';
 import { hasFirebaseConfig, db as firebaseDb } from './firebase.js';
+import { notifyDiscord } from './discord.js';
 
 const HOURS_COLLECTION = 'hoursTracking';
 const ALERTS_COLLECTION = 'hoursAlerts';
@@ -135,6 +136,20 @@ export async function createAlert(deviceId, driver, date, drivingHours, goalHour
       difference: goalHours - drivingHours,
       dismissed: false,
       createdAt: serverTimestamp()
+    });
+
+    notifyDiscord({
+      title: 'Alerta de horas abaixo da meta',
+      description: 'Um tablet ficou abaixo da meta diaria configurada.',
+      color: 0xf2994a,
+      fields: [
+        { name: 'Tablet', value: deviceId },
+        { name: 'Motorista', value: driver || 'Motorista' },
+        { name: 'Data', value: date },
+        { name: 'Horas rodadas', value: drivingHours.toFixed(2) },
+        { name: 'Meta', value: goalHours.toFixed(2) },
+        { name: 'Faltam', value: (goalHours - drivingHours).toFixed(2) },
+      ],
     });
     
     return alertId;

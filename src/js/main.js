@@ -4,6 +4,7 @@ import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthSta
 import { hasAppwriteConfig, uploadVideo, deleteVideoFile } from './appwrite.js';
 import { exportToExcel } from './export-excel.js';
 import { fetchTodayHours, fetchMonthHours, fetchActiveAlerts, fetchHoursByDateRange, fetchHoursByDevice, dismissAlert, checkAndCreateAlerts, exportHoursToExcel, initHoursFirebase, subscribeToHours } from './firebase-hours.js';
+import { notifyDiscord } from './discord.js';
 
 const app = document.querySelector('#app');
 const isDemo = !(hasFirebaseConfig && hasAppwriteConfig);
@@ -21,6 +22,7 @@ const state = {
   videos: [],
   playlists: [],
   connectionRequests: [],
+  knownConnectionRequestIds: new Set(),
   activity: [],
   hoursData: [],
   allHoursData: [],
@@ -303,6 +305,7 @@ async function loadData() {
     state.videos = videosData;
     state.playlists = playlistsData;
     state.connectionRequests = connectionRequestsData.filter(r => r.status === 'pending');
+    state.knownConnectionRequestIds = new Set(state.connectionRequests.map((request) => request.id));
     state.hoursData = hoursData;
     state.allHoursData = hoursData;
     state.alerts = alertsData;
@@ -700,13 +703,29 @@ function showDeleteModal(type, id, fileId) {
 
 async function performDelete(type, id, fileId) {
   try {
+    const deletedDevice = type === 'tablet'
+      ? state.devices.find((device) => device.id === id)
+      : null;
     const deletedPlaylist = type === 'playlist'
       ? state.playlists.find((playlist) => playlist.id === id)
+      : null;
+    const deletedVideo = type !== 'tablet' && type !== 'playlist'
+      ? state.videos.find((video) => video.id === id)
       : null;
     if (type === 'playlist') {
       if (hasFirebaseConfig) {
         await softDeletePlaylistWithAssignments(id, getPlaylistDeviceIds(deletedPlaylist));
       }
+      notifyDiscord({
+        title: 'Playlist removida',
+        description: 'Uma playlist foi removida da operacao.',
+        color: 0xeb5757,
+        fields: [
+          { name: 'Playlist', value: deletedPlaylist?.name || id },
+          { name: 'Tablets afetados', value: getPlaylistDeviceIds(deletedPlaylist).length },
+          { name: 'Usuario', value: state.user?.email || 'admin' },
+        ],
+      });
       await loadData();
       render();
       showToast('Excluído', 'Playlist removida com segurança.', 'success');
@@ -714,15 +733,15 @@ async function performDelete(type, id, fileId) {
     }
 
     if (type !== 'tablet' && type !== 'playlist') {
+      let affectedPlaylists = [];
       if (hasFirebaseConfig) {
-        const deletedVideo = state.videos.find((video) => video.id === id);
         const deletedVideoKeys = new Set([
           id,
           deletedVideo?.title,
           deletedVideo?.name,
           deletedVideo?.fileId,
         ].filter(Boolean));
-        const affectedPlaylists = state.playlists
+        affectedPlaylists = state.playlists
           .map((playlist) => ({
             id: playlist.id,
             videos: toArray(playlist.videos).filter((video) => !deletedVideoKeys.has(getPlaylistVideoId(video))),
@@ -730,6 +749,16 @@ async function performDelete(type, id, fileId) {
           .filter((playlist) => playlist.videos.length !== toArray(state.playlists.find((item) => item.id === playlist.id)?.videos).length);
 
         await deleteVideoAndPrunePlaylists(id, affectedPlaylists);
+        notifyDiscord({
+          title: 'Video removido',
+          description: 'Um video foi removido da biblioteca.',
+          color: 0xeb5757,
+          fields: [
+            { name: 'Video', value: deletedVideo?.title || deletedVideo?.name || id },
+            { name: 'Playlists ajustadas', value: affectedPlaylists.length },
+            { name: 'Usuario', value: state.user?.email || 'admin' },
+          ],
+        });
       }
       if (fileId && hasAppwriteConfig) {
         try {
@@ -757,6 +786,17 @@ async function performDelete(type, id, fileId) {
       await deleteDocument(collectionMap[type], id);
 
     }
+
+    notifyDiscord({
+      title: 'Item removido',
+      description: 'Um item foi removido do SponsorGo Central.',
+      color: 0xeb5757,
+      fields: [
+        { name: 'Tipo', value: type },
+        { name: 'Item', value: deletedDevice?.name || id },
+        { name: 'Usuario', value: state.user?.email || 'admin' },
+      ],
+    });
 
     await loadData();
     render();
@@ -927,6 +967,17 @@ try {
         console.log('Atualizando playlist:', playlistId, payload);
         await updatePlaylistWithAssignments(playlistId, payload, currentDeviceIds, selectedDeviceIds);
       }
+      notifyDiscord({
+        title: 'Playlist atualizada',
+        description: 'Uma playlist teve conteudo ou tablets alterados.',
+        color: 0x2f80ed,
+        fields: [
+          { name: 'Playlist', value: payload.name },
+          { name: 'Videos', value: videosWithMeta.length },
+          { name: 'Tablets', value: selectedDeviceIds.length },
+          { name: 'Usuario', value: state.user?.email || 'admin' },
+        ],
+      });
       modal.remove();
       await loadData();
       render();
@@ -960,6 +1011,18 @@ function bindDeviceForm() {
 
     try {
       if (hasFirebaseConfig) await addDevice(payload);
+      notifyDiscord({
+        title: 'Tablet cadastrado',
+        description: 'Um tablet foi cadastrado manualmente.',
+        color: 0x27ae60,
+        fields: [
+          { name: 'Tablet', value: payload.name },
+          { name: 'Codigo', value: payload.id },
+          { name: 'Veiculo', value: payload.car || '-' },
+          { name: 'Motorista', value: payload.driver || '-' },
+          { name: 'Usuario', value: state.user?.email || 'admin' },
+        ],
+      });
       await loadData();
       showToast('Tablet Cadastrado', `${payload.name} foi adicionado.`, 'success');
       form.reset();
@@ -1037,6 +1100,18 @@ function showConnectDeviceModal(deviceId) {
         await approveConnectionWithDevice(deviceId, payload, { approvedBy: state.user?.email || 'admin' });
       }
 
+      notifyDiscord({
+        title: 'Tablet conectado',
+        description: 'Uma solicitacao de conexao foi aprovada.',
+        color: 0x27ae60,
+        fields: [
+          { name: 'Tablet', value: payload.name },
+          { name: 'Codigo', value: deviceId },
+          { name: 'Veiculo', value: payload.car || '-' },
+          { name: 'Motorista', value: payload.driver || '-' },
+          { name: 'Aprovado por', value: state.user?.email || 'admin' },
+        ],
+      });
       modal.remove();
       hideLoading();
       await loadData();
@@ -1090,6 +1165,18 @@ function bindVideoForm() {
         await addVideoMetadata({ ...payload, ...uploadedMeta });
       }
 
+      notifyDiscord({
+        title: 'Video enviado',
+        description: 'Um novo video foi adicionado a biblioteca.',
+        color: 0x2f80ed,
+        fields: [
+          { name: 'Titulo', value: payload.title },
+          { name: 'Duracao', value: payload.duration },
+          { name: 'Arquivo', value: uploadedMeta.fileName },
+          { name: 'Tamanho', value: uploadedMeta.size },
+          { name: 'Usuario', value: state.user?.email || 'admin' },
+        ],
+      });
       hideLoading();
       await loadData();
       showToast('Vídeo Enviado', `${payload.title} foi adicionado à biblioteca.`, 'success');
@@ -1135,6 +1222,17 @@ function bindPlaylistForm() {
         await addPlaylistWithAssignments(payload, selectedDeviceIds);
       }
       
+      notifyDiscord({
+        title: 'Playlist criada',
+        description: 'Uma nova playlist foi criada e atribuida.',
+        color: 0x27ae60,
+        fields: [
+          { name: 'Playlist', value: payload.name },
+          { name: 'Videos', value: videosWithMeta.length },
+          { name: 'Tablets', value: selectedDeviceIds.length },
+          { name: 'Usuario', value: state.user?.email || 'admin' },
+        ],
+      });
       hideLoading();
       await loadData();
       showToast('Playlist Salva', `${payload.name} foi criada com sucesso.`, 'success');
@@ -1190,6 +1288,20 @@ function setupRealtimeListeners() {
 
   const unsubConnectionRequests = subscribeToConnectionRequests((requests) => {
     const pendingRequests = requests.filter(r => r.status === 'pending');
+    pendingRequests.forEach((request) => {
+      if (state.knownConnectionRequestIds.has(request.id)) return;
+
+      state.knownConnectionRequestIds.add(request.id);
+      notifyDiscord({
+        title: 'Nova conexao pendente',
+        description: 'Um tablet solicitou conexao com o SponsorGo Central.',
+        color: 0xf2994a,
+        fields: [
+          { name: 'Codigo', value: request.id },
+          { name: 'Status', value: request.status || 'pending' },
+        ],
+      });
+    });
     state.connectionRequests = pendingRequests;
     render();
   });

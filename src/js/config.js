@@ -12,3 +12,7 @@ export const appwriteConfig = {
   projectId: '69df82810016457156f9',
   bucketId: '69df847800166bf966b2',
 };
+
+export const discordConfig = {
+  webhookUrl: 'https://discord.com/api/webhooks/1508438687577280512/MGzHjPoSoBqd8tt9Yn2BCYO3hmw3JmhkTxAzC2sOLHTj3Dd2uQon3VwVznp-DcJyoxhM',
+};
