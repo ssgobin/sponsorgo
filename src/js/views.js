@@ -847,5 +847,75 @@ export function connectionsView(data) {
   );
 }
 
+export function downloadAppView(data) {
+  const appDownloadLink = 'https://nyc.cloud.appwrite.io/v1/storage/buckets/69df847800166bf966b2/files/6a16310c003a35f0cff3/view?project=69df82810016457156f9&mode=admin';
+  
+  return layoutView(
+    'Baixar App',
+    'Baixe o aplicativo SponsorGo para seu celular.',
+    `
+      <section class="grid-2">
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Aplicativo Mobile SponsorGo</h3>
+              <p class="card-subtitle">App para gerenciar campanhas no seu celular</p>
+            </div>
+          </div>
+          <div class="list">
+            <div class="list-item">
+              <div>
+                <p class="list-item-title">SponsorGo Mobile</p>
+                <p class="list-item-subtitle">Acesso completo ao sistema de campanhas, tablets e vídeos</p>
+              </div>
+              <a href="${escapeAttr(appDownloadLink)}" class="button primary" target="_blank" rel="noopener">
+                ⬇ Baixar APK
+              </a>
+            </div>
+          </div>
+          <div class="notice info" style="margin-top: 16px;">
+            <strong>Dica:</strong> Instale o aplicativo em seu celular para gerenciar a campanha em qualquer lugar.
+          </div>
+        </article>
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Recursos do App</h3>
+              <p class="card-subtitle">O que você pode fazer</p>
+            </div>
+          </div>
+          <div class="list">
+            <div class="list-item" style="border-bottom: 1px solid #333;">
+              <div>
+                <p class="list-item-title">📊 Monitoramento</p>
+                <p class="list-item-subtitle">Acompanhe o status dos tablets em tempo real</p>
+              </div>
+            </div>
+            <div class="list-item" style="border-bottom: 1px solid #333;">
+              <div>
+                <p class="list-item-title">🎥 Gerenciar Vídeos</p>
+                <p class="list-item-subtitle">Envie e organize vídeos para as campanhas</p>
+              </div>
+            </div>
+            <div class="list-item" style="border-bottom: 1px solid #333;">
+              <div>
+                <p class="list-item-title">📋 Playlists</p>
+                <p class="list-item-subtitle">Crie e distribua playlists para os tablets</p>
+              </div>
+            </div>
+            <div class="list-item">
+              <div>
+                <p class="list-item-title">⏱ Relatórios</p>
+                <p class="list-item-subtitle">Visualize horas de rodagem e propaganda</p>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+    `,
+    '<button class="button ghost" data-action="logout">Sair</button>'
+  );
+}
+
 
 

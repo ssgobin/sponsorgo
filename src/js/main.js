@@ -1,5 +1,5 @@
 ﻿import { loginTemplate, appTemplate } from './templates.js';
-import { dashboardView, devicesView, videosView, playlistsView, monitorView, mapView, settingsView, connectionsView, hoursView } from './views.js';
+import { dashboardView, devicesView, videosView, playlistsView, monitorView, mapView, settingsView, connectionsView, hoursView, downloadAppView } from './views.js';
 import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylistWithAssignments, updatePlaylistWithAssignments, softDeletePlaylistWithAssignments, deleteVideoAndPrunePlaylists, fetchCollection, deleteDocument, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, approveConnectionWithDevice } from './firebase.js';
 import { hasAppwriteConfig, uploadVideo, deleteVideoFile, getVideoFileUrls } from './appwrite.js';
 import { exportToExcel } from './export-excel.js';
@@ -336,6 +336,7 @@ const navItems = [
   { type: 'section', key: 'devices', label: 'Dispositivos' },
   { key: 'connections', label: 'Conexões', icon: '🔗' },
   { key: 'devices', label: 'Tablets', icon: '▣' },
+  { key: 'downloadApp', label: 'Baixar App', icon: '⬇' },
   { type: 'section', key: 'content', label: 'Conteúdo' },
   { key: 'playlists', label: 'Playlists', icon: '≣' },
   { key: 'videos', label: 'Vídeos', icon: '▶' },
@@ -528,6 +529,7 @@ function renderView() {
     monitor: monitorView(payload),
     map: mapView(payload),
     settings: settingsView(payload, isDemo),
+    downloadApp: downloadAppView(payload),
   };
 
   view.innerHTML = views[state.route] || views.dashboard;
