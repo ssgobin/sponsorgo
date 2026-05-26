@@ -1,4 +1,4 @@
-const HOURS_COLLECTION = 'hoursTracking';
+﻿const HOURS_COLLECTION = 'hoursTracking';
 const ALERTS_COLLECTION = 'hoursAlerts';
 const DAILY_GOAL_HOURS = 8;
 
@@ -179,3 +179,4 @@ class HoursTracker {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { HoursTracker, HOURS_COLLECTION, ALERTS_COLLECTION, DAILY_GOAL_HOURS };
 }
+

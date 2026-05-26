@@ -1,10 +1,16 @@
-export function loginTemplate() {
+﻿export function loginTemplate() {
   return `
     <section class="auth-shell">
       <div class="auth-panel">
         <div class="auth-card">
           <div class="brand">
             <img src="/sponsorgo.png" alt="SponsorGo" class="brand-logo-img" />
+          </div>
+          <div class="partner-lockup partner-lockup-auth" aria-label="Parceiro Carmí">
+            <span class="partner-label">Parceiro</span>
+            <span class="partner-logo-frame">
+              <img src="/logo_carmi.png" alt="Carmí" class="partner-logo" />
+            </span>
           </div>
           <h1>Entrar</h1>
           <p>Faça login com sua conta administrativa.</p>
@@ -49,6 +55,12 @@ export function appTemplate() {
           <p>Ambiente</p>
           <strong>SponsorGo Central</strong>
         </div>
+        <div class="partner-lockup partner-lockup-sidebar" aria-label="Parceiro Carmí">
+          <span class="partner-label">Parceiro</span>
+          <span class="partner-logo-frame">
+            <img src="/logo_carmi.png" alt="Carmí" class="partner-logo" />
+          </span>
+        </div>
         <div class="sidebar-brand">
           <span class="brand-label">Desenvolvido por</span>
           <img src="/logo_st.png" alt="SponsorTech" class="brand-logo" />
@@ -75,3 +87,4 @@ export function layoutView(title, subtitle, content, extraActions = '') {
     ${content}
   `;
 }
+

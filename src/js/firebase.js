@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+﻿import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 import {
   getFirestore,
@@ -182,7 +182,7 @@ export async function deleteDocument(collectionName, docId) {
   if (!db) throw new Error('Firebase não configurado.');
   
   if (collectionName === 'playlists') {
-    await updateDoc(doc(db, collectionName, docId), { deletedAt: serverTimestamp(), status: 'ExcluÃ­da' });
+    await updateDoc(doc(db, collectionName, docId), { deletedAt: serverTimestamp(), status: 'Excluída' });
   } else {
     await deleteDoc(doc(db, collectionName, docId));
   }
@@ -201,7 +201,7 @@ export async function assignPlaylistToDevice(deviceId, playlistId) {
 }
 
 export async function unassignPlaylistFromDevice(deviceId, playlistId = null) {
-  if (!db) throw new Error('Firebase nÃ£o configurado.');
+  if (!db) throw new Error('Firebase não configurado.');
   const ref = doc(db, 'deviceAssignments', deviceId);
 
   if (playlistId) {
@@ -289,3 +289,4 @@ export async function rejectConnectionRequest(deviceId) {
     rejectedAt: serverTimestamp(),
   }, { merge: true });
 }
+

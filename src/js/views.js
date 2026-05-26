@@ -1,4 +1,4 @@
-import { layoutView } from './templates.js';
+﻿import { layoutView } from './templates.js';
 import { exportToExcel } from './export-excel.js';
 import { DAILY_GOAL_HOURS } from './firebase-hours.js';
 
@@ -194,7 +194,9 @@ export function dashboardView(data) {
 
 export function devicesView(data) {
   const allowManualDeviceForm = Boolean(data.isDemo);
-  const items = data.devices.length > 0 ? data.devices.map((device) => `
+  const filters = data.listFilters?.devices || { search: '', status: '' };
+  const devices = data.filteredDevices || data.devices;
+  const items = devices.length > 0 ? devices.map((device) => `
     <div class="list-item" data-device-id="${escapeAttr(device.id)}">
       <div>
         <p class="list-item-title">${escapeHtml(device.name || '—')}</p>
@@ -202,7 +204,7 @@ export function devicesView(data) {
       </div>
       <div class="row wrap" style="align-items:center;gap:8px;">
         <span class="status ${safeCssClass(device.status, 'offline')}">${formatDeviceStatus(device.status)}</span>
-        ${device.battery ? `<span class="pill">${device.battery}% bateria</span>` : ''}
+        ${device.battery || device.battery === 0 ? `<span class="pill">${device.battery}% bateria</span>` : ''}
         <button class="button-edit" data-edit="tablet" data-id="${escapeAttr(device.id)}" title="Editar">✎</button>
         <button class="button-delete" data-delete="tablet" data-id="${escapeAttr(device.id)}" title="Excluir">✕</button>
       </div>
@@ -229,50 +231,38 @@ export function devicesView(data) {
           `}
           <form id="device-form" class="list" style="${allowManualDeviceForm ? '' : 'display:none;'}">
             <div class="form-row">
-              <div class="form-group">
-                <label>Nome do Tablet</label>
-                <input class="input" name="name" placeholder="Tablet Corolla 01" required />
-              </div>
-              <div class="form-group">
-                <label>Identificador</label>
-                <input class="input" name="deviceCode" placeholder="TAB-001" required />
-              </div>
-              <div class="form-group">
-                <label>Veículo</label>
-                <input class="input" name="car" placeholder="Toyota Corolla" />
-              </div>
-              <div class="form-group">
-                <label>Motorista</label>
-                <input class="input" name="driver" placeholder="Carlos" />
-              </div>
+              <div class="form-group"><label>Nome do Tablet</label><input class="input" name="name" placeholder="Tablet Corolla 01" required /></div>
+              <div class="form-group"><label>Identificador</label><input class="input" name="deviceCode" placeholder="TAB-001" required /></div>
+              <div class="form-group"><label>Veículo</label><input class="input" name="car" placeholder="Toyota Corolla" /></div>
+              <div class="form-group"><label>Motorista</label><input class="input" name="driver" placeholder="Carlos" /></div>
             </div>
             <button class="button primary" type="submit">Cadastrar Tablet</button>
           </form>
         </article>
         <article class="card">
-          <div class="card-header">
-            <div>
-              <h3 class="card-title">Tablets Cadastrados</h3>
-              <p class="card-subtitle">Lista de todos os tablets</p>
-            </div>
+          <div class="card-header"><div><h3 class="card-title">Tablets Cadastrados</h3><p class="card-subtitle">${devices.length} de ${data.devices.length} tablets exibidos</p></div></div>
+          <div class="filter-controls list-filters">
+            <input id="devices-search" class="input" data-filter-scope="devices" data-filter-key="search" value="${escapeAttr(filters.search)}" placeholder="Buscar por tablet, veículo ou motorista" />
+            <select id="devices-status" class="select" data-filter-scope="devices" data-filter-key="status">
+              <option value="" ${!filters.status ? 'selected' : ''}>Todos os status</option>
+              <option value="online" ${filters.status === 'online' ? 'selected' : ''}>Ativos</option>
+              <option value="offline" ${filters.status === 'offline' ? 'selected' : ''}>Parados</option>
+            </select>
           </div>
-          ${items ? `
-            <div class="list">${items}</div>
-          ` : `
-            <div class="empty-state">
-              <h3>Nenhum tablet cadastrado</h3>
-              <p>Adicione o primeiro tablet ao lado.</p>
-            </div>
-          `}
+          ${items ? `<div class="list">${items}</div>` : `<div class="empty-state"><h3>Nenhum tablet encontrado</h3><p>Ajuste a busca ou os filtros.</p></div>`}
         </article>
       </section>
     `,
     '<button class="button ghost" data-action="logout">Sair</button>'
   );
 }
-
 export function videosView(data) {
-  const items = data.videos.length > 0 ? data.videos.map((video) => `
+  const filters = data.listFilters?.videos || { search: '', status: '' };
+  const videos = data.filteredVideos || data.videos;
+  const items = videos.length > 0 ? videos.map((video) => {
+    const viewUrl = video.viewUrl || '';
+    const downloadUrl = video.downloadUrl || viewUrl;
+    return `
     <div class="list-item">
       <div>
         <p class="list-item-title">${escapeHtml(video.title || '—')}</p>
@@ -280,10 +270,12 @@ export function videosView(data) {
       </div>
       <div class="row wrap" style="align-items:center;gap:8px;">
         <span class="pill ${video.status === 'Ativo' || video.status === 'active' ? 'active' : ''}">${escapeHtml(video.status || 'Rascunho')}</span>
+        ${viewUrl ? `<a class="button secondary small" href="${escapeAttr(viewUrl)}" target="_blank" rel="noopener">Preview</a>` : ''}
+        ${downloadUrl ? `<a class="button secondary small" href="${escapeAttr(downloadUrl)}" download>Download</a>` : ''}
         <button class="button-delete" data-delete="vídeo" data-id="${escapeAttr(video.id)}" data-file-id="${escapeAttr(video.fileId || '')}" title="Excluir">✕</button>
       </div>
     </div>
-  `).join('') : '';
+  `}).join('') : '';
 
   return layoutView(
     'Vídeos',
@@ -291,60 +283,46 @@ export function videosView(data) {
     `
       <section class="grid-2">
         <article class="card">
-          <div class="card-header">
-            <div>
-              <h3 class="card-title">Enviar Novo Vídeo</h3>
-              <p class="card-subtitle">Adicione um vídeo à sua biblioteca</p>
-            </div>
-          </div>
+          <div class="card-header"><div><h3 class="card-title">Enviar Novo Vídeo</h3><p class="card-subtitle">Adicione um vídeo à sua biblioteca</p></div></div>
           <form id="video-form" class="list">
-            <div class="form-row">
-              <div class="form-group">
-                <label>Título do Vídeo</label>
-                <input class="input" name="title" placeholder="Promo Abril 01" required />
-              </div>
-            </div>
+            <div class="form-row"><div class="form-group"><label>Título do Vídeo</label><input class="input" name="title" placeholder="Promo Abril 01" required /></div></div>
             <div class="form-group">
               <label>Arquivo do Vídeo</label>
               <div class="file-upload">
                 <input class="file-input" name="file" type="file" accept="video/*" id="video-file" required />
-                <label for="video-file" class="file-label">
-                  <span class="file-icon">📁</span>
-                  <span class="file-text" id="file-name">Clique para selecionar um vídeo</span>
-                </label>
+                <label for="video-file" class="file-label"><span class="file-icon">▣</span><span class="file-text" id="file-name">Clique para selecionar um vídeo</span></label>
               </div>
             </div>
+            <div class="upload-progress" id="upload-progress" hidden><div class="upload-progress-track"><span id="upload-progress-bar"></span></div><span id="upload-progress-text">Aguardando arquivo...</span></div>
             <button class="button primary" type="submit">Enviar Vídeo</button>
           </form>
         </article>
         <article class="card">
-          <div class="card-header">
-            <div>
-              <h3 class="card-title">Biblioteca de Vídeos</h3>
-              <p class="card-subtitle">Todos os vídeos disponíveis</p>
-            </div>
+          <div class="card-header"><div><h3 class="card-title">Biblioteca de Vídeos</h3><p class="card-subtitle">${videos.length} de ${data.videos.length} vídeos exibidos</p></div></div>
+          <div class="filter-controls list-filters">
+            <input id="videos-search" class="input" data-filter-scope="videos" data-filter-key="search" value="${escapeAttr(filters.search)}" placeholder="Buscar por título ou arquivo" />
+            <select id="videos-status" class="select" data-filter-scope="videos" data-filter-key="status">
+              <option value="" ${!filters.status ? 'selected' : ''}>Todos os status</option>
+              <option value="ativo" ${filters.status === 'ativo' ? 'selected' : ''}>Ativos</option>
+              <option value="active" ${filters.status === 'active' ? 'selected' : ''}>Active</option>
+              <option value="rascunho" ${filters.status === 'rascunho' ? 'selected' : ''}>Rascunho</option>
+            </select>
           </div>
-          ${items ? `
-            <div class="list">${items}</div>
-          ` : `
-            <div class="empty-state">
-              <h3>Nenhum vídeo enviado</h3>
-              <p>Envie o primeiro vídeo aqui.</p>
-            </div>
-          `}
+          ${items ? `<div class="list">${items}</div>` : `<div class="empty-state"><h3>Nenhum vídeo encontrado</h3><p>Ajuste a busca ou envie um novo vídeo.</p></div>`}
         </article>
       </section>
     `,
     '<button class="button ghost" data-action="logout">Sair</button>'
   );
 }
-
 export function playlistsView(data) {
-  const items = data.playlists.length > 0 ? data.playlists.map((playlist) => `
+  const filters = data.listFilters?.playlists || { search: '', status: '' };
+  const playlists = data.filteredPlaylists || data.playlists;
+  const items = playlists.length > 0 ? playlists.map((playlist) => `
     <div class="list-item">
       <div>
         <p class="list-item-title">${escapeHtml(playlist.name || '—')}</p>
-        <p class="list-item-subtitle">${playlist.videos?.length || playlist.videos || 0} vídeos • ${playlist.devices?.length || playlist.devices || 0} tablets • ${formatDate(playlist.updatedAt)}</p>
+        <p class="list-item-subtitle">${countItems(playlist.videos)} vídeos • ${countItems(playlist.devices)} tablets • ${formatDate(playlist.updatedAt)}</p>
       </div>
       <div class="row wrap" style="align-items:center;gap:8px;">
         <span class="pill ${playlist.status === 'Ativa' || playlist.status === 'active' ? 'active' : ''}">${escapeHtml(playlist.status || 'Inativa')}</span>
@@ -360,17 +338,9 @@ export function playlistsView(data) {
     `
       <section class="grid-2">
         <article class="card">
-          <div class="card-header">
-            <div>
-              <h3 class="card-title">Nova Playlist</h3>
-              <p class="card-subtitle">Escolha quais vídeos terão e quais tablets receberão</p>
-            </div>
-          </div>
+          <div class="card-header"><div><h3 class="card-title">Nova Playlist</h3><p class="card-subtitle">Escolha quais vídeos terão e quais tablets receberão</p></div></div>
           <form id="playlist-form" class="list">
-            <div class="form-group">
-              <label>Nome da Playlist</label>
-              <input class="input" name="name" placeholder="Campanha Abril" required />
-            </div>
+            <div class="form-group"><label>Nome da Playlist</label><input class="input" name="name" placeholder="Campanha Abril" required /></div>
             <div class="form-group">
               <label>Selecionar Vídeos</label>
               <div class="checkbox-list">
@@ -399,27 +369,23 @@ export function playlistsView(data) {
           </form>
         </article>
         <article class="card">
-          <div class="card-header">
-            <div>
-              <h3 class="card-title">Playlists Criadas</h3>
-              <p class="card-subtitle">Lista de todas as playlists</p>
-            </div>
+          <div class="card-header"><div><h3 class="card-title">Playlists Criadas</h3><p class="card-subtitle">${playlists.length} de ${data.playlists.length} playlists exibidas</p></div></div>
+          <div class="filter-controls list-filters">
+            <input id="playlists-search" class="input" data-filter-scope="playlists" data-filter-key="search" value="${escapeAttr(filters.search)}" placeholder="Buscar por nome" />
+            <select id="playlists-status" class="select" data-filter-scope="playlists" data-filter-key="status">
+              <option value="" ${!filters.status ? 'selected' : ''}>Todos os status</option>
+              <option value="ativa" ${filters.status === 'ativa' ? 'selected' : ''}>Ativas</option>
+              <option value="active" ${filters.status === 'active' ? 'selected' : ''}>Active</option>
+              <option value="inativa" ${filters.status === 'inativa' ? 'selected' : ''}>Inativas</option>
+            </select>
           </div>
-          ${items ? `
-            <div class="list">${items}</div>
-          ` : `
-            <div class="empty-state">
-              <h3>Nenhuma playlist criada</h3>
-              <p>Crie a primeira playlist ao lado.</p>
-            </div>
-          `}
+          ${items ? `<div class="list">${items}</div>` : `<div class="empty-state"><h3>Nenhuma playlist encontrada</h3><p>Ajuste a busca ou crie uma nova playlist.</p></div>`}
         </article>
       </section>
     `,
     '<button class="button ghost" data-action="logout">Sair</button>'
   );
 }
-
 export function monitorView(data) {
   const getVideoTitle = (videoId) => {
     if (!videoId) return '—';
@@ -680,15 +646,16 @@ export function hoursView(data) {
   `}).join('');
 
   const alertRows = alerts?.map((alert) => `
-    <div class="alert-item ${alert.dismissed ? 'dismissed' : ''}">
+    <div class="alert-item ${safeCssClass(alert.severity || 'warning', 'warning')} ${alert.dismissed ? 'dismissed' : ''}">
       <div class="alert-content">
-        <span class="alert-icon">⚠</span>
+        <span class="alert-icon">${alert.severity === 'danger' ? '!' : 'i'}</span>
         <div class="alert-text">
-          <strong>${escapeHtml(alert.driver || 'Motorista')}</strong> não rodou ${alert.difference?.toFixed(1) || '0'} horas
-          <span class="alert-detail">(Meta: ${DAILY_GOAL_HOURS}h, Rodou: ${alert.drivingHours?.toFixed(1) || '0'}h)</span>
+          <strong>${escapeHtml(alert.title || 'Alerta')}</strong>
+          <span>${escapeHtml(alert.message || 'Verifique este item.')}</span>
+          <span class="alert-detail">${escapeHtml(alert.detail || '')}</span>
         </div>
       </div>
-      <button class="button small" data-dismiss-alert="${escapeAttr(alert.id)}">Dispensar</button>
+      ${alert.type === 'hours' ? `<button class="button small" data-dismiss-alert="${escapeAttr(alert.id)}">Dispensar</button>` : '<span class="pill">Operacional</span>'}
     </div>
   `).join('') || '<p class="text-muted">Nenhum alerta pendente</p>';
 
@@ -869,7 +836,7 @@ export function connectionsView(data) {
           <div class="card-header">
             <div>
               <h3 class="card-title">Tablets Conectados</h3>
-              <p class="card-subtitle">Já approvedos</p>
+              <p class="card-subtitle">Já aprovados</p>
             </div>
           </div>
           ${connectedDevices.length > 0 ? connectedRows : '<p class="text-muted">Nenhum tablet conectado</p>'}
@@ -879,3 +846,6 @@ export function connectionsView(data) {
     ''
   );
 }
+
+
+

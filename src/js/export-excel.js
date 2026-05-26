@@ -1,4 +1,4 @@
-export function exportToExcel(state, fileName = 'relatorio-sponsorgo') {
+﻿export function exportToExcel(state, fileName = 'relatorio-sponsorgo') {
   const dateStr = new Date().toLocaleDateString('pt-BR').replace(/\//g, '-');
   const sheets = [];
 
@@ -34,9 +34,9 @@ function createDevicesRows(devices) {
 function createVideosRows(videos) {
   return videos.map((v, index) => ({
     '#': index + 1,
-    'Titulo': v.title || '',
+    'Título': v.title || '',
     'Arquivo': v.fileName || '',
-    'Duracao': v.duration || '',
+    'Duração': v.duration || '',
     'Tamanho': v.size || '',
     'Status': v.status === 'Ativo' || v.status === 'active' ? 'Ativo' : 'Rascunho',
     'Data Upload': formatDateTime(v.createdAt),
@@ -155,3 +155,4 @@ function xmlText(value) {
 function xmlAttr(value) {
   return xmlText(value).replace(/"/g, '&quot;');
 }
+

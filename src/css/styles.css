@@ -205,6 +205,56 @@ a {
   object-fit: contain;
 }
 
+.partner-lockup {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.partner-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+}
+
+.partner-logo-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 150px;
+  padding: 8px;
+  border: 1px solid rgba(245, 179, 55, 0.28);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(145deg, #07111d 0%, #101b29 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 8px 18px rgba(15, 23, 42, 0.12);
+}
+
+.partner-logo {
+  display: block;
+  width: 100%;
+  max-height: 72px;
+  object-fit: contain;
+  border-radius: 5px;
+}
+
+.partner-lockup-sidebar {
+  padding: 14px 8px 16px;
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.partner-lockup-auth {
+  margin: -12px 0 24px;
+}
+
+.partner-lockup-auth .partner-logo-frame {
+  max-width: 128px;
+}
+
 .main {
   flex: 1;
   padding: 24px;
@@ -903,6 +953,43 @@ tr:hover td {
   font-weight: 600;
 }
 
+.upload-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.upload-progress[hidden] {
+  display: none;
+}
+
+.upload-progress-track {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  background: var(--border-light);
+  border-radius: 999px;
+}
+
+.upload-progress-track span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--primary);
+  border-radius: inherit;
+  transition: width 0.2s ease;
+}
+
+.upload-progress > span {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
 .checkbox-list {
   display: flex;
   flex-direction: column;
@@ -1476,6 +1563,16 @@ tr:hover td {
   flex-wrap: wrap;
 }
 
+.list-filters {
+  margin-bottom: 14px;
+  justify-content: flex-start;
+}
+
+.list-filters .input {
+  min-width: min(100%, 280px);
+  flex: 1;
+}
+
 .filter-controls .input,
 .filter-controls .select {
   padding: 10px 14px;
@@ -1510,6 +1607,21 @@ tr:hover td {
   background: var(--danger-light);
   border-radius: var(--radius-sm);
   border-left: 4px solid var(--danger);
+}
+
+.alert-item.warning {
+  background: var(--warning-light);
+  border-left-color: var(--warning);
+}
+
+.alert-item.info {
+  background: var(--primary-light);
+  border-left-color: var(--primary);
+}
+
+.alert-item.danger {
+  background: var(--danger-light);
+  border-left-color: var(--danger);
 }
 
 .alert-item.dismissed {

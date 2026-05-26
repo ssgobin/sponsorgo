@@ -1,9 +1,9 @@
-import { loginTemplate, appTemplate } from './templates.js';
+﻿import { loginTemplate, appTemplate } from './templates.js';
 import { dashboardView, devicesView, videosView, playlistsView, monitorView, mapView, settingsView, connectionsView, hoursView } from './views.js';
 import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylistWithAssignments, updatePlaylistWithAssignments, softDeletePlaylistWithAssignments, deleteVideoAndPrunePlaylists, fetchCollection, deleteDocument, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, approveConnectionWithDevice } from './firebase.js';
-import { hasAppwriteConfig, uploadVideo, deleteVideoFile } from './appwrite.js';
+import { hasAppwriteConfig, uploadVideo, deleteVideoFile, getVideoFileUrls } from './appwrite.js';
 import { exportToExcel } from './export-excel.js';
-import { fetchTodayHours, fetchMonthHours, fetchActiveAlerts, fetchHoursByDateRange, fetchHoursByDevice, dismissAlert, checkAndCreateAlerts, exportHoursToExcel, initHoursFirebase, subscribeToHours } from './firebase-hours.js';
+import { fetchTodayHours, fetchMonthHours, fetchActiveAlerts, fetchHoursByDateRange, fetchHoursByDevice, dismissAlert, checkAndCreateAlerts, exportHoursToExcel, initHoursFirebase, subscribeToHours, DAILY_GOAL_HOURS } from './firebase-hours.js';
 import { notifyDiscord } from './discord.js';
 
 const app = document.querySelector('#app');
@@ -32,7 +32,13 @@ const state = {
     startDate: '',
     endDate: '',
   },
+  listFilters: {
+    devices: { search: '', status: '' },
+    videos: { search: '', status: '' },
+    playlists: { search: '', status: '' },
+  },
   alerts: [],
+  savedAlerts: [],
   loading: true,
   unsubscribe: null,
   collapsedNavSections: {},
@@ -106,6 +112,129 @@ function getFilteredHoursData() {
     const matchesDevice = !deviceId || record.deviceId === deviceId;
     return inDateRange && matchesDevice;
   });
+}
+
+function normalizeSearch(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function textMatchesSearch(record, search, fields) {
+  const term = normalizeSearch(search);
+  if (!term) return true;
+  return fields.some((field) => normalizeSearch(record?.[field]).includes(term));
+}
+
+function getFilteredDevices() {
+  const filters = state.listFilters.devices;
+  return state.devices.filter((device) => {
+    const matchesStatus = !filters.status || device.status === filters.status;
+    const matchesSearch = textMatchesSearch(device, filters.search, ['id', 'name', 'car', 'driver']);
+    return matchesStatus && matchesSearch;
+  });
+}
+
+function getFilteredVideos() {
+  const filters = state.listFilters.videos;
+  return state.videos.filter((video) => {
+    const normalizedStatus = String(video.status || '').toLowerCase();
+    const matchesStatus = !filters.status || normalizedStatus === filters.status;
+    const matchesSearch = textMatchesSearch(video, filters.search, ['title', 'fileName', 'duration', 'size']);
+    return matchesStatus && matchesSearch;
+  });
+}
+
+function getFilteredPlaylists() {
+  const filters = state.listFilters.playlists;
+  return state.playlists.filter((playlist) => {
+    const normalizedStatus = String(playlist.status || '').toLowerCase();
+    const matchesStatus = !filters.status || normalizedStatus === filters.status;
+    const matchesSearch = textMatchesSearch(playlist, filters.search, ['name', 'status', 'id']);
+    return matchesStatus && matchesSearch;
+  });
+}
+
+function getTimestampMs(value) {
+  if (!value) return 0;
+  if (value.toDate) return value.toDate().getTime();
+  if (typeof value === 'number') return value;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getAssignedDeviceIds() {
+  const ids = new Set();
+  state.playlists.forEach((playlist) => {
+    if (playlist.deletedAt) return;
+    getPlaylistDeviceIds(playlist).forEach((deviceId) => ids.add(deviceId));
+  });
+  return ids;
+}
+
+function buildOperationalAlerts(savedAlerts = []) {
+  const now = Date.now();
+  const assignedDeviceIds = getAssignedDeviceIds();
+  const derivedAlerts = [];
+
+  state.devices.forEach((device) => {
+    const label = device.name || device.id || 'Tablet';
+    const lastHeartbeatMs = getTimestampMs(device.lastHeartbeat || device.lastSeen);
+    const minutesOffline = lastHeartbeatMs ? Math.floor((now - lastHeartbeatMs) / 60000) : null;
+
+    if (device.status === 'offline' && (!minutesOffline || minutesOffline >= 10)) {
+      derivedAlerts.push({
+        id: `offline-${device.id}`,
+        type: 'offline',
+        severity: 'danger',
+        title: 'Tablet sem contato',
+        message: `${label} está offline${minutesOffline ? ` há ${minutesOffline} min` : ''}.`,
+        detail: 'Verifique conexão, energia e app aberto.',
+      });
+    }
+
+    if (typeof device.battery === 'number' && device.battery <= 20) {
+      derivedAlerts.push({
+        id: `battery-${device.id}`,
+        type: 'battery',
+        severity: device.battery <= 10 ? 'danger' : 'warning',
+        title: 'Bateria baixa',
+        message: `${label} está com ${device.battery}% de bateria.`,
+        detail: 'Conecte o carregador para evitar interrupção da campanha.',
+      });
+    }
+
+    if (!assignedDeviceIds.has(device.id)) {
+      derivedAlerts.push({
+        id: `assignment-${device.id}`,
+        type: 'assignment',
+        severity: 'warning',
+        title: 'Sem playlist atribuída',
+        message: `${label} não tem campanha vinculada.`,
+        detail: 'Atribua uma playlist para garantir exibição de mídia.',
+      });
+    }
+
+    if (!device.location || device.location.latitude == null || device.location.longitude == null) {
+      derivedAlerts.push({
+        id: `gps-${device.id}`,
+        type: 'gps',
+        severity: 'info',
+        title: 'GPS ausente',
+        message: `${label} ainda não enviou localização.`,
+        detail: 'Confirme permissão de localização no tablet.',
+      });
+    }
+  });
+
+  const normalizedSavedAlerts = savedAlerts.map((alert) => ({
+    ...alert,
+    type: alert.type || 'hours',
+    severity: alert.severity || 'warning',
+    title: alert.title || 'Meta diária abaixo do esperado',
+    message: alert.message || `${alert.driver || 'Motorista'} não rodou ${Number(alert.difference || 0).toFixed(1)} horas da meta.`,
+    detail: alert.detail || `Meta: ${DAILY_GOAL_HOURS}h, rodou: ${Number(alert.drivingHours || 0).toFixed(1)}h.`,
+  }));
+
+  return [...normalizedSavedAlerts, ...derivedAlerts];
 }
 
 function formatVideoDuration(seconds) {
@@ -302,13 +431,18 @@ async function loadData() {
     });
 
     state.devices = devicesWithStatus;
-    state.videos = videosData;
+    state.alerts = buildOperationalAlerts(state.savedAlerts);
+    state.videos = videosData.map((video) => ({
+      ...video,
+      ...(video.fileId && hasAppwriteConfig ? getVideoFileUrls(video.fileId) : {}),
+    }));
     state.playlists = playlistsData;
     state.connectionRequests = connectionRequestsData.filter(r => r.status === 'pending');
     state.knownConnectionRequestIds = new Set(state.connectionRequests.map((request) => request.id));
     state.hoursData = hoursData;
     state.allHoursData = hoursData;
-    state.alerts = alertsData;
+    state.savedAlerts = alertsData;
+    state.alerts = buildOperationalAlerts(alertsData);
 
     const onlineCount = devicesWithStatus.filter(d => d.status === 'online').length;
     const offlineCount = devicesWithStatus.filter(d => d.status === 'offline').length;
@@ -376,6 +510,9 @@ function renderView() {
   const view = document.querySelector('#view');
   const payload = {
     ...state,
+    filteredDevices: getFilteredDevices(),
+    filteredVideos: getFilteredVideos(),
+    filteredPlaylists: getFilteredPlaylists(),
     hoursData: state.route === 'hours' ? getFilteredHoursData() : state.hoursData,
     hoursFilters: getResolvedHoursFilters(),
     isDemo
@@ -613,6 +750,32 @@ function bindForms() {
   bindFileInput();
   bindExportButton();
   bindConnectButtons();
+  bindListFilters();
+}
+
+function bindListFilters() {
+  document.querySelectorAll('[data-filter-scope]').forEach((input) => {
+    const updateFilter = () => {
+      const scope = input.dataset.filterScope;
+      const key = input.dataset.filterKey;
+      if (!state.listFilters[scope] || !key) return;
+      state.listFilters[scope][key] = input.value;
+      const id = input.id;
+      const selectionStart = input.selectionStart;
+      const selectionEnd = input.selectionEnd;
+      render();
+      requestAnimationFrame(() => {
+        const nextInput = document.getElementById(id);
+        if (!nextInput) return;
+        nextInput.focus();
+        if (typeof selectionStart === 'number' && typeof selectionEnd === 'number') {
+          nextInput.setSelectionRange(selectionStart, selectionEnd);
+        }
+      });
+    };
+
+    input.addEventListener(input.tagName === 'SELECT' ? 'change' : 'input', updateFilter);
+  });
 }
 
 function bindFileInput() {
@@ -718,12 +881,12 @@ async function performDelete(type, id, fileId) {
       }
       notifyDiscord({
         title: 'Playlist removida',
-        description: 'Uma playlist foi removida da operacao.',
+        description: 'Uma playlist foi removida da operação.',
         color: 0xeb5757,
         fields: [
           { name: 'Playlist', value: deletedPlaylist?.name || id },
           { name: 'Tablets afetados', value: getPlaylistDeviceIds(deletedPlaylist).length },
-          { name: 'Usuario', value: state.user?.email || 'admin' },
+          { name: 'Usuário', value: state.user?.email || 'admin' },
         ],
       });
       await loadData();
@@ -750,13 +913,13 @@ async function performDelete(type, id, fileId) {
 
         await deleteVideoAndPrunePlaylists(id, affectedPlaylists);
         notifyDiscord({
-          title: 'Video removido',
-          description: 'Um video foi removido da biblioteca.',
+          title: 'Vídeo removido',
+          description: 'Um vídeo foi removido da biblioteca.',
           color: 0xeb5757,
           fields: [
-            { name: 'Video', value: deletedVideo?.title || deletedVideo?.name || id },
+            { name: 'Vídeo', value: deletedVideo?.title || deletedVideo?.name || id },
             { name: 'Playlists ajustadas', value: affectedPlaylists.length },
-            { name: 'Usuario', value: state.user?.email || 'admin' },
+            { name: 'Usuário', value: state.user?.email || 'admin' },
           ],
         });
       }
@@ -794,7 +957,7 @@ async function performDelete(type, id, fileId) {
       fields: [
         { name: 'Tipo', value: type },
         { name: 'Item', value: deletedDevice?.name || id },
-        { name: 'Usuario', value: state.user?.email || 'admin' },
+        { name: 'Usuário', value: state.user?.email || 'admin' },
       ],
     });
 
@@ -949,7 +1112,7 @@ function showEditPlaylistModal(playlistId) {
 
     const conflicts = findDevicePlaylistConflicts(selectedDeviceIds, playlistId);
     if (conflicts.length > 0) {
-      showToast('Tablet jÃ¡ em uso', `Remova o tablet da playlist ${conflicts.join(', ')} antes de salvar.`, 'warning');
+      showToast('Tablet já em uso', `Remova o tablet da playlist ${conflicts.join(', ')} antes de salvar.`, 'warning');
       return;
     }
 
@@ -969,13 +1132,13 @@ try {
       }
       notifyDiscord({
         title: 'Playlist atualizada',
-        description: 'Uma playlist teve conteudo ou tablets alterados.',
+        description: 'Uma playlist teve conteúdo ou tablets alterados.',
         color: 0x2f80ed,
         fields: [
           { name: 'Playlist', value: payload.name },
           { name: 'Videos', value: videosWithMeta.length },
           { name: 'Tablets', value: selectedDeviceIds.length },
-          { name: 'Usuario', value: state.user?.email || 'admin' },
+          { name: 'Usuário', value: state.user?.email || 'admin' },
         ],
       });
       modal.remove();
@@ -1017,10 +1180,10 @@ function bindDeviceForm() {
         color: 0x27ae60,
         fields: [
           { name: 'Tablet', value: payload.name },
-          { name: 'Codigo', value: payload.id },
+          { name: 'Código', value: payload.id },
           { name: 'Veiculo', value: payload.car || '-' },
           { name: 'Motorista', value: payload.driver || '-' },
-          { name: 'Usuario', value: state.user?.email || 'admin' },
+          { name: 'Usuário', value: state.user?.email || 'admin' },
         ],
       });
       await loadData();
@@ -1102,11 +1265,11 @@ function showConnectDeviceModal(deviceId) {
 
       notifyDiscord({
         title: 'Tablet conectado',
-        description: 'Uma solicitacao de conexao foi aprovada.',
+        description: 'Uma solicitação de conexão foi aprovada.',
         color: 0x27ae60,
         fields: [
           { name: 'Tablet', value: payload.name },
-          { name: 'Codigo', value: deviceId },
+          { name: 'Código', value: deviceId },
           { name: 'Veiculo', value: payload.car || '-' },
           { name: 'Motorista', value: payload.driver || '-' },
           { name: 'Aprovado por', value: state.user?.email || 'admin' },
@@ -1129,6 +1292,24 @@ function bindVideoForm() {
   const form = document.querySelector('#video-form');
   if (!form) return;
 
+  const submitButton = form.querySelector('button[type="submit"]');
+  const progressEl = document.getElementById('upload-progress');
+  const progressBar = document.getElementById('upload-progress-bar');
+  const progressText = document.getElementById('upload-progress-text');
+
+  const setUploadProgress = (progress, label = 'Preparando envio...') => {
+    const value = Math.max(0, Math.min(100, Math.round(progress || 0)));
+    if (progressEl) progressEl.hidden = false;
+    if (progressBar) progressBar.style.width = `${value}%`;
+    if (progressText) progressText.textContent = `${label} ${value}%`;
+  };
+
+  const resetUploadProgress = () => {
+    if (progressEl) progressEl.hidden = true;
+    if (progressBar) progressBar.style.width = '0%';
+    if (progressText) progressText.textContent = 'Aguardando arquivo...';
+  };
+
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const formData = new FormData(form);
@@ -1138,53 +1319,72 @@ function bindVideoForm() {
       return;
     }
 
+    let uploadedFileId = '';
     try {
-      showLoading('Enviando vídeo...');
+      submitButton.disabled = true;
+      setUploadProgress(3, 'Lendo vídeo...');
       const duration = await detectVideoDuration(file);
+      setUploadProgress(8, 'Validando vídeo...');
       const payload = {
         title: String(formData.get('title')).trim(),
         duration,
         status: 'Ativo',
       };
-      
+
       let uploadedMeta = {
         fileName: file.name,
         size: `${Math.round(file.size / (1024 * 1024))} MB`,
       };
 
       if (hasAppwriteConfig && file) {
-        const upload = await uploadVideo(file);
+        const upload = await uploadVideo(file, (progress) => {
+          setUploadProgress(progress.progress, 'Enviando vídeo...');
+        });
+        uploadedFileId = upload.fileId;
         uploadedMeta = {
           fileName: upload.fileName,
           size: `${Math.round(upload.sizeOriginal / (1024 * 1024))} MB`,
           fileId: upload.fileId,
+          mimeType: upload.mimeType,
+          viewUrl: upload.viewUrl,
+          downloadUrl: upload.downloadUrl,
         };
       }
 
+      setUploadProgress(96, 'Salvando dados...');
       if (hasFirebaseConfig) {
         await addVideoMetadata({ ...payload, ...uploadedMeta });
       }
 
       notifyDiscord({
-        title: 'Video enviado',
-        description: 'Um novo video foi adicionado a biblioteca.',
+        title: 'Vídeo enviado',
+        description: 'Um novo vídeo foi adicionado à biblioteca.',
         color: 0x2f80ed,
         fields: [
-          { name: 'Titulo', value: payload.title },
-          { name: 'Duracao', value: payload.duration },
+          { name: 'Título', value: payload.title },
+          { name: 'Duração', value: payload.duration },
           { name: 'Arquivo', value: uploadedMeta.fileName },
           { name: 'Tamanho', value: uploadedMeta.size },
-          { name: 'Usuario', value: state.user?.email || 'admin' },
+          { name: 'Usuário', value: state.user?.email || 'admin' },
         ],
       });
-      hideLoading();
+      setUploadProgress(100, 'Concluído...');
       await loadData();
-      showToast('Vídeo Enviado', `${payload.title} foi adicionado à biblioteca.`, 'success');
+      showToast('Vídeo enviado', `${payload.title} foi adicionado à biblioteca.`, 'success');
       form.reset();
+      resetUploadProgress();
       render();
     } catch (error) {
-      hideLoading();
+      if (uploadedFileId && hasAppwriteConfig) {
+        try {
+          await deleteVideoFile(uploadedFileId);
+        } catch (cleanupError) {
+          console.warn('Não foi possível remover o arquivo enviado após falha:', cleanupError);
+        }
+      }
       showToast('Erro', error.message || 'Não foi possível enviar o vídeo.', 'error');
+    } finally {
+      submitButton.disabled = false;
     }
   });
 }
@@ -1202,7 +1402,7 @@ function bindPlaylistForm() {
 
     const conflicts = findDevicePlaylistConflicts(selectedDeviceIds);
     if (conflicts.length > 0) {
-      showToast('Tablet jÃ¡ em uso', `Remova o tablet da playlist ${conflicts.join(', ')} antes de criar outra.`, 'warning');
+      showToast('Tablet já em uso', `Remova o tablet da playlist ${conflicts.join(', ')} antes de criar outra.`, 'warning');
       return;
     }
 
@@ -1224,13 +1424,13 @@ function bindPlaylistForm() {
       
       notifyDiscord({
         title: 'Playlist criada',
-        description: 'Uma nova playlist foi criada e atribuida.',
+        description: 'Uma nova playlist foi criada e atribuída.',
         color: 0x27ae60,
         fields: [
           { name: 'Playlist', value: payload.name },
           { name: 'Videos', value: videosWithMeta.length },
           { name: 'Tablets', value: selectedDeviceIds.length },
-          { name: 'Usuario', value: state.user?.email || 'admin' },
+          { name: 'Usuário', value: state.user?.email || 'admin' },
         ],
       });
       hideLoading();
@@ -1283,6 +1483,7 @@ function setupRealtimeListeners() {
 
   const unsubPlaylists = subscribeToPlaylists((playlistsData) => {
     state.playlists = playlistsData;
+    state.alerts = buildOperationalAlerts(state.savedAlerts);
     render();
   });
 
@@ -1293,11 +1494,11 @@ function setupRealtimeListeners() {
 
       state.knownConnectionRequestIds.add(request.id);
       notifyDiscord({
-        title: 'Nova conexao pendente',
-        description: 'Um tablet solicitou conexao com o SponsorGo Central.',
+        title: 'Nova conexão pendente',
+        description: 'Um tablet solicitou conexão com o SponsorGo Central.',
         color: 0xf2994a,
         fields: [
-          { name: 'Codigo', value: request.id },
+          { name: 'Código', value: request.id },
           { name: 'Status', value: request.status || 'pending' },
         ],
       });
@@ -1402,7 +1603,8 @@ async function bindHoursView() {
       const alertId = btn.dataset.dismissAlert;
       try {
         await dismissAlert(alertId);
-        state.alerts = state.alerts.filter(a => a.id !== alertId);
+        state.savedAlerts = state.savedAlerts.filter(a => a.id !== alertId);
+        state.alerts = buildOperationalAlerts(state.savedAlerts);
         btn.closest('.alert-item')?.remove();
         showToast('Alerta dispensado', 'O alerta foi removido da lista.', 'success');
       } catch (error) {
@@ -1485,3 +1687,4 @@ setTimeout(() => {
     render();
   }
 }, 5000);
+

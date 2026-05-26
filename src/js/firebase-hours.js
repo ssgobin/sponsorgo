@@ -1,4 +1,4 @@
-import { 
+﻿import { 
   getFirestore,
   collection,
   doc,
@@ -286,3 +286,4 @@ export async function exportHoursToExcel(hoursData, devices) {
 }
 
 export { DAILY_GOAL_HOURS };
+

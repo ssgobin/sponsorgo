@@ -17,17 +17,35 @@ if (hasAppwriteConfig) {
   bucketId = appwriteConfig.bucketId;
 }
 
-export async function uploadVideo(file) {
+function assertStorageReady() {
   if (!storage || !bucketId) {
-    throw new Error('Appwrite Storage não configurado.');
+    throw new Error('Appwrite Storage nao configurado.');
+  }
+}
+
+export function getVideoFileUrls(fileId) {
+  if (!storage || !bucketId || !fileId) {
+    return { viewUrl: '', downloadUrl: '' };
   }
 
-  const uploaded = await storage.createFile(bucketId, ID.unique(), file);
+  return {
+    viewUrl: storage.getFileView(bucketId, fileId),
+    downloadUrl: storage.getFileDownload(bucketId, fileId),
+  };
+}
+
+export async function uploadVideo(file, onProgress) {
+  assertStorageReady();
+
+  const uploaded = await storage.createFile(bucketId, ID.unique(), file, undefined, onProgress);
+  const urls = getVideoFileUrls(uploaded.$id);
+
   return {
     fileId: uploaded.$id,
     fileName: uploaded.name,
     sizeOriginal: uploaded.sizeOriginal,
     mimeType: uploaded.mimeType,
+    ...urls,
   };
 }
 
