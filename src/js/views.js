@@ -848,7 +848,7 @@ export function connectionsView(data) {
 }
 
 export function downloadAppView(data) {
-  const appDownloadLink = 'https://nyc.cloud.appwrite.io/v1/storage/buckets/69df847800166bf966b2/files/6a16310c003a35f0cff3/view?project=69df82810016457156f9&mode=admin';
+  const appDownloadLink = 'https://nyc.cloud.appwrite.io/v1/storage/buckets/69df847800166bf966b2/files/6a16310c003a35f0cff3/download?project=69df82810016457156f9';
   
   return layoutView(
     'Baixar App',
@@ -868,7 +868,7 @@ export function downloadAppView(data) {
                 <p class="list-item-title">SponsorGo Mobile</p>
                 <p class="list-item-subtitle">Acesso completo ao sistema de campanhas, tablets e vídeos</p>
               </div>
-              <a href="${escapeAttr(appDownloadLink)}" class="button primary" target="_blank" rel="noopener">
+              <a href="${escapeAttr(appDownloadLink)}" class="button primary" target="_blank" rel="noopener" download="sponsorgo.apk">
                 ⬇ Baixar APK
               </a>
             </div>
