@@ -848,7 +848,7 @@ export function connectionsView(data) {
 }
 
 export function downloadAppView(data) {
-  const appDownloadLink = 'https://nyc.cloud.appwrite.io/v1/storage/buckets/69df847800166bf966b2/files/6a16310c003a35f0cff3/download?project=69df82810016457156f9';
+  const appDownloadLink = 'https://drive.google.com/file/d/1onCs_Qpkkwca5sz_ymxuz6udd1H7TagJ/view?usp=sharing';
   
   return layoutView(
     'Baixar App',
