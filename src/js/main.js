@@ -1,6 +1,6 @@
 ﻿import { loginTemplate, appTemplate } from './templates.js';
 import { dashboardView, devicesView, videosView, playlistsView, monitorView, mapView, settingsView, connectionsView, hoursView, downloadAppView } from './views.js';
-import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylistWithAssignments, updatePlaylistWithAssignments, softDeletePlaylistWithAssignments, deleteVideoAndPrunePlaylists, fetchCollection, deleteDocument, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, approveConnectionWithDevice } from './firebase.js';
+import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylistWithAssignments, updatePlaylistWithAssignments, softDeletePlaylistWithAssignments, deleteVideoAndPrunePlaylists, fetchCollection, fetchLocationTrack, deleteDocument, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, approveConnectionWithDevice } from './firebase.js';
 import { hasAppwriteConfig, uploadVideo, deleteVideoFile, getVideoFileUrls } from './appwrite.js';
 import { exportToExcel } from './export-excel.js';
 import { fetchTodayHours, fetchMonthHours, fetchActiveAlerts, fetchHoursByDateRange, fetchHoursByDevice, dismissAlert, checkAndCreateAlerts, exportHoursToExcel, initHoursFirebase, subscribeToHours, DAILY_GOAL_HOURS } from './firebase-hours.js';
@@ -32,6 +32,12 @@ const state = {
     startDate: '',
     endDate: '',
   },
+  mapFilters: {
+    deviceId: 'all',
+    date: getLocalDateString(),
+    showRoutes: true,
+  },
+  mapRoutePoints: [],
   listFilters: {
     devices: { search: '', status: '' },
     videos: { search: '', status: '' },
@@ -509,6 +515,15 @@ function renderNav() {
 
 function renderView() {
   const view = document.querySelector('#view');
+  if (state.route === 'map') {
+    if (!state.mapFilters.date) {
+      state.mapFilters.date = getLocalDateString();
+    }
+    if (!state.mapFilters.deviceId) {
+      state.mapFilters.deviceId = 'all';
+    }
+  }
+
   const payload = {
     ...state,
     filteredDevices: getFilteredDevices(),
@@ -535,9 +550,11 @@ function renderView() {
   view.innerHTML = views[state.route] || views.dashboard;
   bindForms();
   bindHoursView();
+  bindMapView();
   
   if (state.route === 'map') {
     window.mapDevicesData = buildMapDevicesData(state.devices);
+    window.mapRoutePointsData = buildMapRoutePointsData(state.mapRoutePoints);
     console.log('renderView - route is map, scheduling initMap');
     setTimeout(initMap, 500);
   }
@@ -559,6 +576,23 @@ function buildMapDevicesData(devices) {
     }));
 }
 
+function buildMapRoutePointsData(points) {
+  return (points || [])
+    .map((point) => ({
+      deviceId: point.deviceId || '',
+      deviceName: point.deviceName || '',
+      car: point.car || '',
+      driver: point.driver || '',
+      lat: point.latitude,
+      lng: point.longitude,
+      timestamp: point.timestamp,
+      neighborhood: point.neighborhood || '',
+      city: point.city || '',
+      state: point.state || '',
+    }))
+    .filter((point) => point.lat != null && point.lng != null);
+}
+
 const DEFAULT_CENTER = [-22.7391, -47.3304];
 
 function initMap() {
@@ -572,7 +606,7 @@ function initMap() {
     return;
   }
   
-  if (window.map && window.mapMarkersLayer) {
+  if (window.map && window.mapMarkersLayer && window.mapRouteLayer) {
     const mapContainer = window.map.getContainer?.();
     if (mapContainer === mapElement) {
       console.log('Map valid, just invalidating');
@@ -583,6 +617,7 @@ function initMap() {
       console.log('Map container changed, recreating');
       window.map = null;
       window.mapMarkersLayer = null;
+      window.mapRouteLayer = null;
     }
   }
   
@@ -595,6 +630,7 @@ function initMap() {
       attribution: '&copy; OpenStreetMap'
     }).addTo(map);
     
+    window.mapRouteLayer = window.L.layerGroup().addTo(map);
     window.mapMarkersLayer = window.L.layerGroup().addTo(map);
     window.map = map;
     
@@ -609,29 +645,85 @@ function updateMapMarkers() {
   console.log('updateMapMarkers called', { 
     map: !!window.map, 
     layer: !!window.mapMarkersLayer,
-    data: window.mapDevicesData?.length
+    data: window.mapDevicesData?.length,
+    routePoints: window.mapRoutePointsData?.length
   });
   
-  if (!window.map || !window.mapMarkersLayer) {
+  if (!window.map || !window.mapMarkersLayer || !window.mapRouteLayer) {
     console.log('No map or layer, skipping');
     return;
   }
   
   try {
     window.mapMarkersLayer.clearLayers();
+    window.mapRouteLayer.clearLayers();
   } catch(e) {
     console.log('Error clearing layers:', e);
   }
   
   const devices = window.mapDevicesData || [];
+  const routePoints = window.mapRoutePointsData || [];
+  const showRoutes = window.mapShowRoutes !== false;
   
-  if (devices.length === 0) {
+  if (devices.length === 0 && (!showRoutes || routePoints.length === 0)) {
     console.log('No device data');
     window.map.setView(DEFAULT_CENTER, 13);
     return;
   }
   
   const bounds = [];
+
+  if (showRoutes && routePoints.length > 0) {
+    const groupedRoutes = routePoints.reduce((groups, point) => {
+      const key = point.deviceId || 'sem_dispositivo';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(point);
+      return groups;
+    }, {});
+
+    Object.values(groupedRoutes).forEach((points) => {
+      const orderedPoints = points
+        .slice()
+        .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
+
+      if (orderedPoints.length > 1) {
+        const latLngs = orderedPoints.map((point) => [point.lat, point.lng]);
+        window.L.polyline(latLngs, {
+          color: '#1f6feb',
+          weight: 5,
+          opacity: 0.85,
+          lineJoin: 'round',
+          lineCap: 'round',
+        }).addTo(window.mapRouteLayer);
+
+        const first = orderedPoints[0];
+        const last = orderedPoints[orderedPoints.length - 1];
+        const routeLabel = first.car || first.deviceName || first.deviceId || 'Rota';
+        window.L.circleMarker([first.lat, first.lng], {
+          radius: 6,
+          color: '#1f8f5f',
+          fillColor: '#1f8f5f',
+          fillOpacity: 1,
+        }).addTo(window.mapRouteLayer).bindPopup(`Inicio da rota - ${escapeHtml(routeLabel)}`);
+        window.L.circleMarker([last.lat, last.lng], {
+          radius: 6,
+          color: '#1f6feb',
+          fillColor: '#1f6feb',
+          fillOpacity: 1,
+        }).addTo(window.mapRouteLayer).bindPopup(`Ultimo ponto - ${escapeHtml(routeLabel)}`);
+        latLngs.forEach((point) => bounds.push(point));
+      } else if (orderedPoints.length === 1) {
+        const point = orderedPoints[0];
+        window.L.circleMarker([point.lat, point.lng], {
+          radius: 7,
+          color: '#1f6feb',
+          fillColor: '#1f6feb',
+          fillOpacity: 1,
+        }).addTo(window.mapRouteLayer).bindPopup('Ponto unico da rota');
+        bounds.push([point.lat, point.lng]);
+      }
+    });
+  }
   
   devices.forEach((device) => {
     if (device.lat != null && device.lng != null) {
@@ -649,7 +741,9 @@ function updateMapMarkers() {
           align-items: center;
           justify-content: center;
           font-size: 16px;
-        ">🚗</div>`,
+          color: white;
+          font-weight: 700;
+        ">C</div>`,
         iconSize: [32, 32],
         iconAnchor: [16, 16]
       });
@@ -678,6 +772,78 @@ function updateMapMarkers() {
   }
   
   console.log('Markers updated:', bounds.length);
+}
+
+async function bindMapView() {
+  if (state.route !== 'map') return;
+
+  const deviceFilter = document.getElementById('map-device-filter');
+  const dateFilter = document.getElementById('map-date-filter');
+  const routeToggle = document.getElementById('map-route-toggle');
+  const status = document.getElementById('map-route-status');
+
+  if (!deviceFilter || !dateFilter) return;
+
+  const loadRoute = async () => {
+    const deviceId = deviceFilter.value;
+    const date = dateFilter.value || getLocalDateString();
+    const showRoutes = routeToggle ? routeToggle.checked : state.mapFilters.showRoutes !== false;
+    state.mapFilters = { deviceId, date, showRoutes };
+    window.mapShowRoutes = showRoutes;
+
+    if (!deviceId || !hasFirebaseConfig) {
+      state.mapRoutePoints = [];
+      window.mapRoutePointsData = [];
+      if (status) status.textContent = showRoutes ? 'Nenhuma rota carregada' : 'Linhas escondidas';
+      updateMapMarkers();
+      return;
+    }
+
+    if (!showRoutes) {
+      window.mapRoutePointsData = [];
+      if (status) status.textContent = 'Linhas escondidas';
+      updateMapMarkers();
+      return;
+    }
+
+    if (status) status.textContent = 'Carregando rota...';
+    try {
+      const selectedDevices = deviceId === 'all'
+        ? state.devices.filter((device) => device.id)
+        : state.devices.filter((device) => device.id === deviceId);
+      const trackGroups = await Promise.all(selectedDevices.map(async (device) => {
+        const points = await fetchLocationTrack(device.id, date);
+        return points.map((point) => ({
+          ...point,
+          deviceId: point.deviceId || device.id,
+          deviceName: device.name || device.id,
+          car: device.car || '',
+          driver: point.driver || device.driver || '',
+        }));
+      }));
+      const points = trackGroups.flat();
+      state.mapRoutePoints = points;
+      window.mapRoutePointsData = buildMapRoutePointsData(points);
+      updateMapMarkers();
+      if (status) {
+        status.textContent = points.length > 0
+          ? `${points.length} pontos carregados`
+          : 'Sem pontos para esta data';
+      }
+    } catch (error) {
+      console.error('Erro ao carregar rota:', error);
+      state.mapRoutePoints = [];
+      window.mapRoutePointsData = [];
+      updateMapMarkers();
+      if (status) status.textContent = 'Erro ao carregar rota';
+      showToast('Erro no mapa', 'Nao foi possivel carregar a rota do carro.', 'error');
+    }
+  };
+
+  deviceFilter.addEventListener('change', loadRoute);
+  dateFilter.addEventListener('change', loadRoute);
+  routeToggle?.addEventListener('change', loadRoute);
+  await loadRoute();
 }
 
 function bindLogin() {
@@ -1689,4 +1855,3 @@ setTimeout(() => {
     render();
   }
 }, 5000);
-

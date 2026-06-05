@@ -178,6 +178,17 @@ export async function fetchCollection(name, includeDeleted = false) {
   return data;
 }
 
+export async function fetchLocationTrack(deviceId, date) {
+  if (!db || !deviceId || !date) return [];
+  const trackId = `${deviceId}_${date}`;
+  const q = query(
+    collection(doc(db, 'locationTracks', trackId), 'points'),
+    orderBy('timestamp', 'asc')
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((item) => ({ id: item.id, ...item.data() }));
+}
+
 export async function deleteDocument(collectionName, docId) {
   if (!db) throw new Error('Firebase não configurado.');
   

@@ -476,11 +476,45 @@ export function monitorView(data) {
 
 export function mapView(data) {
   const devicesWithLocation = data.devices.filter(d => d.location && d.location.latitude != null && d.location.longitude != null);
+  const mapFilters = data.mapFilters || {};
+  const routePoints = data.mapRoutePoints || [];
+  const selectedDevice = data.devices.find((device) => device.id === mapFilters.deviceId);
+  const selectedLabel = mapFilters.deviceId === 'all'
+    ? 'Todos os carros'
+    : (selectedDevice?.driver || 'Motorista nao informado');
   
   return layoutView(
     'Mapa',
-    'Visualize a localização dos tablets em tempo real.',
+    'Visualize a localização atual e o caminho percorrido pelos carros.',
     `
+      <section class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Rota do Carro</h3>
+            <p class="card-subtitle">Selecione um tablet e uma data para ver a linha azul por onde ele passou.</p>
+          </div>
+          <div class="filter-controls">
+            <select id="map-device-filter" class="select">
+              <option value="all" ${mapFilters.deviceId === 'all' ? 'selected' : ''}>Todos os carros</option>
+              ${data.devices.length > 0 ? data.devices.map((device) => `
+                <option value="${escapeAttr(device.id)}" ${mapFilters.deviceId === device.id ? 'selected' : ''}>
+                  ${escapeHtml(device.name || device.id)}${device.car ? ` - ${escapeHtml(device.car)}` : ''}
+                </option>
+              `).join('') : '<option value="">Nenhum tablet</option>'}
+            </select>
+            <input type="date" id="map-date-filter" class="input" value="${escapeAttr(mapFilters.date || getLocalDateString())}" />
+            <label class="toggle-control">
+              <input type="checkbox" id="map-route-toggle" ${mapFilters.showRoutes === false ? '' : 'checked'} />
+              <span>Mostrar linhas</span>
+            </label>
+          </div>
+        </div>
+        <div class="map-route-summary">
+          <span><strong>${escapeHtml(selectedLabel)}</strong></span>
+          <span>${escapeHtml(mapFilters.deviceId === 'all' ? `${data.devices.length} carros cadastrados` : (selectedDevice?.car || 'Veiculo nao informado'))}</span>
+          <span id="map-route-status">${mapFilters.showRoutes === false ? 'Linhas escondidas' : (routePoints.length > 0 ? `${routePoints.length} pontos carregados` : 'Nenhuma rota carregada')}</span>
+        </div>
+      </section>
       <section class="card" style="padding: 0; overflow: hidden;">
         <div id="map" style="height: 500px; width: 100%;"></div>
       </section>
@@ -501,9 +535,9 @@ export function mapView(data) {
         </article>
         <article class="card">
           <div class="metric">
-            <span class="metric-label">Offline</span>
-            <strong class="metric-value">${devicesWithLocation.filter(d => d.status === 'offline').length}</strong>
-            <span class="metric-trend danger">Sem localização</span>
+            <span class="metric-label">Pontos da Rota</span>
+            <strong class="metric-value">${routePoints.length}</strong>
+            <span class="metric-trend">Linha azul no mapa</span>
           </div>
         </article>
       </section>
