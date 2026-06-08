@@ -2134,6 +2134,97 @@ tr:hover td {
   accent-color: var(--primary);
 }
 
+.report-toolbar {
+  padding: 14px 16px;
+}
+
+.report-toolbar .filter-controls {
+  justify-content: flex-start;
+}
+
+.report-toolbar .select,
+.report-toolbar .input {
+  width: auto;
+  min-width: 160px;
+}
+
+.ranking-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ranking-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.ranking-position {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ranking-main {
+  min-width: 0;
+}
+
+.ranking-main strong,
+.ranking-value strong {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.ranking-main span,
+.ranking-value span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.25;
+  margin-top: 2px;
+}
+
+.ranking-value {
+  min-width: 74px;
+  text-align: right;
+}
+
+.report-bar {
+  width: 100%;
+  min-width: 110px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8eef6;
+}
+
+.ranking-main .report-bar {
+  margin-top: 8px;
+}
+
+.report-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary) 0%, #1f8f5f 100%);
+}
+
 @media (max-width: 1024px) {
   .app-shell {
     display: block;

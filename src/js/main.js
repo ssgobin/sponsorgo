@@ -1,9 +1,10 @@
 ﻿import { loginTemplate, appTemplate } from './templates.js';
-import { dashboardView, devicesView, videosView, playlistsView, monitorView, mapView, settingsView, connectionsView, hoursView, downloadAppView } from './views.js';
-import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylistWithAssignments, updatePlaylistWithAssignments, softDeletePlaylistWithAssignments, deleteVideoAndPrunePlaylists, fetchCollection, fetchLocationTrack, deleteDocument, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, approveConnectionWithDevice } from './firebase.js';
+import { dashboardView, devicesView, videosView, playlistsView, geofencingView, monitorView, mapView, settingsView, connectionsView, hoursView, campaignReportsView, downloadAppView } from './views.js';
+import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylistWithAssignments, updatePlaylistWithAssignments, softDeletePlaylistWithAssignments, deleteVideoAndPrunePlaylists, fetchCollection, fetchLocationTrack, deleteDocument, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, approveConnectionWithDevice, addGeofenceRule } from './firebase.js';
 import { hasAppwriteConfig, uploadVideo, deleteVideoFile, getVideoFileUrls } from './appwrite.js';
 import { exportToExcel } from './export-excel.js';
 import { fetchTodayHours, fetchMonthHours, fetchActiveAlerts, fetchHoursByDateRange, fetchHoursByDevice, dismissAlert, checkAndCreateAlerts, exportHoursToExcel, initHoursFirebase, subscribeToHours, DAILY_GOAL_HOURS } from './firebase-hours.js';
+import { exportCampaignReportRows, fetchCampaignReports } from './firebase-reports.js';
 import { notifyDiscord } from './discord.js';
 
 const app = document.querySelector('#app');
@@ -21,6 +22,7 @@ const state = {
   devices: [],
   videos: [],
   playlists: [],
+  geofenceRules: [],
   connectionRequests: [],
   knownConnectionRequestIds: new Set(),
   activity: [],
@@ -29,6 +31,14 @@ const state = {
   hoursFilters: {
     period: 'today',
     deviceId: '',
+    startDate: '',
+    endDate: '',
+  },
+  campaignMetrics: [],
+  playbackProofs: [],
+  campaignFilters: {
+    period: 'today',
+    playlistId: '',
     startDate: '',
     endDate: '',
   },
@@ -42,6 +52,7 @@ const state = {
     devices: { search: '', status: '' },
     videos: { search: '', status: '' },
     playlists: { search: '', status: '' },
+    geofenceRules: { search: '', status: '' },
   },
   alerts: [],
   savedAlerts: [],
@@ -110,6 +121,50 @@ function getResolvedHoursFilters() {
   };
 }
 
+function getCampaignDateRange(filters = state.campaignFilters) {
+  const period = filters.period || 'today';
+
+  switch (period) {
+    case 'week': {
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      return {
+        startDate: getLocalDateString(weekAgo),
+        endDate: getLocalDateString(),
+      };
+    }
+    case 'month': {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth() + 1;
+      const lastDay = new Date(year, month, 0).getDate();
+      return {
+        startDate: `${year}-${String(month).padStart(2, '0')}-01`,
+        endDate: `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`,
+      };
+    }
+    case 'custom':
+      return {
+        startDate: filters.startDate || getLocalDateString(),
+        endDate: filters.endDate || filters.startDate || getLocalDateString(),
+      };
+    case 'today':
+    default:
+      return {
+        startDate: getLocalDateString(),
+        endDate: getLocalDateString(),
+      };
+  }
+}
+
+function getResolvedCampaignFilters() {
+  const range = getCampaignDateRange();
+  return {
+    ...state.campaignFilters,
+    ...range,
+  };
+}
+
 function getFilteredHoursData() {
   const { startDate, endDate, deviceId } = getResolvedHoursFilters();
   return state.allHoursData.filter((record) => {
@@ -155,6 +210,23 @@ function getFilteredPlaylists() {
     const normalizedStatus = String(playlist.status || '').toLowerCase();
     const matchesStatus = !filters.status || normalizedStatus === filters.status;
     const matchesSearch = textMatchesSearch(playlist, filters.search, ['name', 'status', 'id']);
+    return matchesStatus && matchesSearch;
+  });
+}
+
+function getFilteredGeofenceRules() {
+  const filters = state.listFilters.geofenceRules;
+  return state.geofenceRules.filter((rule) => {
+    const isActive = rule.active !== false;
+    const matchesStatus = !filters.status ||
+      (filters.status === 'active' && isActive) ||
+      (filters.status === 'inactive' && !isActive);
+    const playlist = state.playlists.find((item) => item.id === rule.playlistId);
+    const searchable = {
+      ...rule,
+      playlistName: playlist?.name || '',
+    };
+    const matchesSearch = textMatchesSearch(searchable, filters.search, ['name', 'state', 'city', 'neighborhood', 'region', 'playlistName']);
     return matchesStatus && matchesSearch;
   });
 }
@@ -339,6 +411,7 @@ const navItems = [
   { key: 'monitor', label: 'Monitoramento', icon: '◌' },
   { key: 'map', label: 'Mapa', icon: '🗺' },
   { key: 'hours', label: 'Horas', icon: '⏱' },
+  { key: 'campaignReports', label: 'Campanhas', icon: '▤' },
   { type: 'section', key: 'devices', label: 'Dispositivos' },
   { key: 'connections', label: 'Conexões', icon: '🔗' },
   { key: 'devices', label: 'Tablets', icon: '▣' },
@@ -346,6 +419,7 @@ const navItems = [
   { type: 'section', key: 'content', label: 'Conteúdo' },
   { key: 'playlists', label: 'Playlists', icon: '≣' },
   { key: 'videos', label: 'Vídeos', icon: '▶' },
+  { key: 'geofencing', label: 'Geofencing', icon: '◎' },
   { type: 'section', key: 'system', label: 'Sistema' },
   { key: 'settings', label: 'Configurações', icon: '⚙' },
 ];
@@ -413,10 +487,11 @@ async function loadData() {
   }
 
   try {
-    const [devicesData, videosData, playlistsData, connectionRequestsData, hoursData, alertsData] = await Promise.all([
+    const [devicesData, videosData, playlistsData, geofenceRulesData, connectionRequestsData, hoursData, alertsData] = await Promise.all([
       fetchCollection('devices'),
       fetchCollection('videos'),
       fetchCollection('playlists'),
+      fetchCollection('geofenceRules'),
       fetchCollection('connectionRequests'),
       fetchTodayHours(),
       fetchActiveAlerts()
@@ -444,6 +519,7 @@ async function loadData() {
       ...(video.fileId && hasAppwriteConfig ? getVideoFileUrls(video.fileId) : {}),
     }));
     state.playlists = playlistsData;
+    state.geofenceRules = geofenceRulesData;
     state.connectionRequests = connectionRequestsData.filter(r => r.status === 'pending');
     state.knownConnectionRequestIds = new Set(state.connectionRequests.map((request) => request.id));
     state.hoursData = hoursData;
@@ -465,6 +541,27 @@ async function loadData() {
   }
 
   state.loading = false;
+}
+
+async function loadCampaignReports() {
+  if (!hasFirebaseConfig) {
+    state.campaignMetrics = [];
+    state.playbackProofs = [];
+    return;
+  }
+
+  const { startDate, endDate } = getResolvedCampaignFilters();
+
+  try {
+    const reportData = await fetchCampaignReports(startDate, endDate);
+    state.campaignMetrics = reportData.metrics;
+    state.playbackProofs = reportData.proofs;
+  } catch (error) {
+    console.error('Erro ao carregar relatorios de campanha:', error);
+    state.campaignMetrics = [];
+    state.playbackProofs = [];
+    showToast('Relatórios indisponíveis', 'Não foi possível carregar as métricas de campanha.', 'warning');
+  }
 }
 
 function render() {
@@ -529,8 +626,10 @@ function renderView() {
     filteredDevices: getFilteredDevices(),
     filteredVideos: getFilteredVideos(),
     filteredPlaylists: getFilteredPlaylists(),
+    filteredGeofenceRules: getFilteredGeofenceRules(),
     hoursData: state.route === 'hours' ? getFilteredHoursData() : state.hoursData,
     hoursFilters: getResolvedHoursFilters(),
+    campaignFilters: getResolvedCampaignFilters(),
     isDemo
   };
 
@@ -539,8 +638,10 @@ function renderView() {
     devices: devicesView(payload),
     connections: connectionsView(payload),
     hours: hoursView(payload),
+    campaignReports: campaignReportsView(payload),
     videos: videosView(payload),
     playlists: playlistsView(payload),
+    geofencing: geofencingView(payload),
     monitor: monitorView(payload),
     map: mapView(payload),
     settings: settingsView(payload, isDemo),
@@ -550,6 +651,7 @@ function renderView() {
   view.innerHTML = views[state.route] || views.dashboard;
   bindForms();
   bindHoursView();
+  bindCampaignReportsView();
   bindMapView();
   
   if (state.route === 'map') {
@@ -881,7 +983,7 @@ function bindLogin() {
 }
 
 function bindAppEvents() {
-  document.querySelector('#nav')?.addEventListener('click', (event) => {
+  document.querySelector('#nav')?.addEventListener('click', async (event) => {
     const sectionButton = event.target.closest('[data-nav-section]');
     if (sectionButton) {
       const sectionKey = sectionButton.dataset.navSection;
@@ -893,6 +995,9 @@ function bindAppEvents() {
     const button = event.target.closest('[data-route]');
     if (!button) return;
     state.route = button.dataset.route;
+    if (state.route === 'campaignReports') {
+      await loadCampaignReports();
+    }
     render();
   });
 
@@ -913,6 +1018,7 @@ function bindForms() {
   bindDeviceForm();
   bindVideoForm();
   bindPlaylistForm();
+  bindGeofenceForm();
   bindDeleteButtons();
   bindEditButtons();
   bindFileInput();
@@ -973,6 +1079,64 @@ function bindFileInput() {
   });
 }
 
+function normalizeGeoText(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function bindGeofenceForm() {
+  const form = document.querySelector('#geofence-form');
+  if (!form) return;
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const formData = new FormData(form);
+    const stateValue = String(formData.get('state') || '').trim().toUpperCase();
+    const city = String(formData.get('city') || '').trim();
+    const neighborhood = String(formData.get('neighborhood') || '').trim();
+    const region = String(formData.get('region') || '').trim();
+
+    if (!stateValue && !city && !neighborhood && !region) {
+      showToast('Localização obrigatória', 'Informe pelo menos estado, cidade, bairro ou região.', 'warning');
+      return;
+    }
+
+    const payload = {
+      name: String(formData.get('name') || '').trim(),
+      playlistId: String(formData.get('playlistId') || '').trim(),
+      state: stateValue,
+      city,
+      neighborhood,
+      region,
+      stateKey: normalizeGeoText(stateValue),
+      cityKey: normalizeGeoText(city),
+      neighborhoodKey: normalizeGeoText(neighborhood),
+      regionKey: normalizeGeoText(region),
+      priority: Number(formData.get('priority') || 0),
+      active: String(formData.get('active')) !== 'false',
+    };
+
+    try {
+      showLoading('Salvando regra...');
+      if (hasFirebaseConfig) {
+        await addGeofenceRule(payload);
+      }
+      hideLoading();
+      await loadData();
+      form.reset();
+      render();
+      showToast('Regra salva', 'O geofencing será aplicado pelos tablets na próxima atualização de localização.', 'success');
+    } catch (error) {
+      hideLoading();
+      console.error('Erro ao salvar geofence:', error);
+      showToast('Erro', error.message || 'Não foi possível salvar a regra.', 'error');
+    }
+  });
+}
+
 function bindDeleteButtons() {
   document.querySelectorAll('[data-delete]').forEach(button => {
     button.addEventListener('click', () => {
@@ -998,13 +1162,15 @@ function showDeleteModal(type, id, fileId) {
   const labels = {
     'tablet': 'tablet',
     'vídeo': 'vídeo',
-    'playlist': 'playlist'
+    'playlist': 'playlist',
+    'geofence': 'regra'
   };
   
   const icons = {
     'tablet': '▣',
     'vídeo': '▶',
-    'playlist': '≣'
+    'playlist': '≣',
+    'geofence': '◎'
   };
   
   const modal = document.createElement('div');
@@ -1060,6 +1226,16 @@ async function performDelete(type, id, fileId) {
       await loadData();
       render();
       showToast('Excluído', 'Playlist removida com segurança.', 'success');
+      return;
+    }
+
+    if (type === 'geofence') {
+      if (hasFirebaseConfig) {
+        await deleteDocument('geofenceRules', id);
+      }
+      await loadData();
+      render();
+      showToast('Excluído', 'Regra de geofencing removida.', 'success');
       return;
     }
 
@@ -1784,6 +1960,74 @@ async function bindHoursView() {
         showToast('Erro', 'Não foi possível dispensar o alerta.', 'error');
       }
     });
+  });
+}
+
+async function bindCampaignReportsView() {
+  if (state.route !== 'campaignReports') return;
+
+  const period = document.getElementById('campaign-period');
+  const startDate = document.getElementById('campaign-date-start');
+  const endDate = document.getElementById('campaign-date-end');
+  const playlist = document.getElementById('campaign-playlist');
+  const applyBtn = document.getElementById('campaign-apply');
+  const exportBtn = document.getElementById('campaign-export');
+
+  const updateCustomDateVisibility = () => {
+    const display = period?.value === 'custom' ? 'inline-block' : 'none';
+    document.querySelectorAll('.campaign-custom-date').forEach((input) => {
+      input.style.display = display;
+    });
+  };
+
+  const applyFilters = async () => {
+    state.campaignFilters = {
+      period: period?.value || 'today',
+      playlistId: playlist?.value || '',
+      startDate: startDate?.value || '',
+      endDate: endDate?.value || '',
+    };
+
+    showLoading('Carregando relatórios...');
+    await loadCampaignReports();
+    hideLoading();
+    render();
+  };
+
+  updateCustomDateVisibility();
+
+  period?.addEventListener('change', () => {
+    updateCustomDateVisibility();
+  });
+  applyBtn?.addEventListener('click', applyFilters);
+  playlist?.addEventListener('change', applyFilters);
+  startDate?.addEventListener('change', () => {
+    if (period?.value === 'custom') applyFilters();
+  });
+  endDate?.addEventListener('change', () => {
+    if (period?.value === 'custom') applyFilters();
+  });
+
+  exportBtn?.addEventListener('click', async () => {
+    const selectedPlaylistId = state.campaignFilters.playlistId || '';
+    const metrics = selectedPlaylistId
+      ? state.campaignMetrics.filter((item) => item.playlistId === selectedPlaylistId)
+      : state.campaignMetrics;
+    const proofs = selectedPlaylistId
+      ? state.playbackProofs.filter((item) => item.playlistId === selectedPlaylistId)
+      : state.playbackProofs;
+
+    const rows = await exportCampaignReportRows(metrics, proofs);
+    if (!rows.campaignRows.length && !rows.proofRows.length) {
+      showToast('Sem dados', 'Não há relatórios para exportar nesse período.', 'warning');
+      return;
+    }
+
+    exportToExcel({
+      campanhas: rows.campaignRows,
+      comprovantes: rows.proofRows,
+    }, `relatorio-campanhas-${getLocalDateString()}`);
+    showToast('Relatório exportado', 'A planilha de campanhas foi baixada.', 'success');
   });
 }
 

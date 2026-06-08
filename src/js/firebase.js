@@ -56,6 +56,20 @@ export async function addPlaylist(payload) {
   return ref.id;
 }
 
+export async function addGeofenceRule(payload) {
+  if (!db) throw new Error('Firebase não configurado.');
+  const ref = doc(collection(db, 'geofenceRules'));
+  await setDoc(ref, { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+  return ref.id;
+}
+
+export async function updateGeofenceRule(ruleId, payload) {
+  if (!db) throw new Error('Firebase não configurado.');
+  const ref = doc(db, 'geofenceRules', ruleId);
+  await setDoc(ref, { ...payload, updatedAt: serverTimestamp() }, { merge: true });
+  return ref.id;
+}
+
 export async function addPlaylistWithAssignments(payload, selectedDeviceIds = []) {
   if (!db) throw new Error('Firebase não configurado.');
   const playlistRef = doc(collection(db, 'playlists'));

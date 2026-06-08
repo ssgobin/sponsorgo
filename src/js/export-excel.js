@@ -4,6 +4,11 @@
 
   if (Array.isArray(state.hoursReport)) {
     sheets.push({ name: 'Horas', rows: state.hoursReport });
+  } else if (Array.isArray(state.campanhas) || Array.isArray(state.comprovantes)) {
+    sheets.push(
+      { name: 'Campanhas', rows: state.campanhas || [] },
+      { name: 'Comprovantes', rows: state.comprovantes || [] }
+    );
   } else {
     sheets.push(
       { name: 'Tablets', rows: createDevicesRows(state.devices || []) },

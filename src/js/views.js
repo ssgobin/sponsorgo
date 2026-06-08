@@ -386,6 +386,111 @@ export function playlistsView(data) {
     '<button class="button ghost" data-action="logout">Sair</button>'
   );
 }
+
+export function geofencingView(data) {
+  const rules = data.geofenceRules || [];
+  const playlists = data.playlists || [];
+  const filters = data.listFilters?.geofenceRules || { search: '', status: '' };
+  const filteredRules = data.filteredGeofenceRules || rules;
+
+  const playlistOptions = playlists.map((playlist) => `
+    <option value="${escapeAttr(playlist.id)}">${escapeHtml(playlist.name || playlist.id)}</option>
+  `).join('');
+
+  const getPlaylistName = (playlistId) => {
+    const playlist = playlists.find((item) => item.id === playlistId);
+    return playlist?.name || playlistId || '—';
+  };
+
+  const ruleItems = filteredRules.length > 0 ? filteredRules.map((rule) => {
+    const location = [
+      rule.state ? `UF: ${rule.state}` : '',
+      rule.city ? `Cidade: ${rule.city}` : '',
+      rule.neighborhood ? `Bairro: ${rule.neighborhood}` : '',
+      rule.region ? `Regiao: ${rule.region}` : '',
+    ].filter(Boolean).join(' • ');
+
+    return `
+      <div class="list-item">
+        <div>
+          <p class="list-item-title">${escapeHtml(rule.name || 'Regra sem nome')}</p>
+          <p class="list-item-subtitle">${escapeHtml(location || 'Localizacao nao definida')}</p>
+          <p class="list-item-subtitle">Playlist: ${escapeHtml(getPlaylistName(rule.playlistId))} • Prioridade ${Number(rule.priority || 0)}</p>
+        </div>
+        <div class="row wrap" style="align-items:center;gap:8px;">
+          <span class="pill ${rule.active === false ? '' : 'active'}">${rule.active === false ? 'Inativa' : 'Ativa'}</span>
+          <button class="button-delete" data-delete="geofence" data-id="${escapeAttr(rule.id)}" title="Excluir">✕</button>
+        </div>
+      </div>
+    `;
+  }).join('') : '';
+
+  return layoutView(
+    'Geofencing',
+    'Troque playlists automaticamente por estado, cidade, bairro ou regiao.',
+    `
+      <section class="grid-2">
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Nova Regra de Região</h3>
+              <p class="card-subtitle">A regra mais específica e prioritária vence no tablet</p>
+            </div>
+          </div>
+          <form id="geofence-form" class="list">
+            <div class="form-row">
+              <div class="form-group"><label>Nome da regra</label><input class="input" name="name" placeholder="Centro - Campanha Almoço" required /></div>
+              <div class="form-group">
+                <label>Playlist</label>
+                <select class="select" name="playlistId" required>
+                  <option value="">Selecione uma playlist</option>
+                  ${playlistOptions}
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Estado</label><input class="input" name="state" placeholder="SP" maxlength="40" /></div>
+              <div class="form-group"><label>Cidade</label><input class="input" name="city" placeholder="Americana" /></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Bairro</label><input class="input" name="neighborhood" placeholder="Centro" /></div>
+              <div class="form-group"><label>Região</label><input class="input" name="region" placeholder="Zona Sul, Shopping, Rodovia..." /></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Prioridade</label><input class="input" name="priority" type="number" value="0" min="0" max="999" /></div>
+              <div class="form-group">
+                <label>Status</label>
+                <select class="select" name="active">
+                  <option value="true">Ativa</option>
+                  <option value="false">Inativa</option>
+                </select>
+              </div>
+            </div>
+            <button class="button primary" type="submit">Salvar Regra</button>
+          </form>
+        </article>
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Regras Cadastradas</h3>
+              <p class="card-subtitle">${filteredRules.length} de ${rules.length} regras exibidas</p>
+            </div>
+          </div>
+          <div class="filter-controls list-filters">
+            <input id="geofence-search" class="input" data-filter-scope="geofenceRules" data-filter-key="search" value="${escapeAttr(filters.search)}" placeholder="Buscar por nome, cidade, bairro ou playlist" />
+            <select id="geofence-status" class="select" data-filter-scope="geofenceRules" data-filter-key="status">
+              <option value="" ${!filters.status ? 'selected' : ''}>Todos os status</option>
+              <option value="active" ${filters.status === 'active' ? 'selected' : ''}>Ativas</option>
+              <option value="inactive" ${filters.status === 'inactive' ? 'selected' : ''}>Inativas</option>
+            </select>
+          </div>
+          ${ruleItems ? `<div class="list">${ruleItems}</div>` : '<div class="empty-state"><h3>Nenhuma regra encontrada</h3><p>Crie uma regra para trocar campanhas automaticamente por localização.</p></div>'}
+        </article>
+      </section>
+    `,
+    '<button class="button ghost" data-action="logout">Sair</button>'
+  );
+}
 export function monitorView(data) {
   const getVideoTitle = (videoId) => {
     if (!videoId) return '—';
@@ -813,6 +918,218 @@ export function hoursView(data) {
             <span class="summary-value">${formatPercentage(totalDrivingHours, totalPropagandaHours)}%</span>
           </div>
         </div>
+      </section>
+    `,
+    '<button class="button ghost" data-action="logout">Sair</button>'
+  );
+}
+
+export function campaignReportsView(data) {
+  const {
+    campaignMetrics = [],
+    playbackProofs = [],
+    campaignFilters = {},
+    playlists = [],
+  } = data;
+
+  const formatDuration = (seconds) => {
+    const totalSeconds = Math.max(0, Math.round(seconds || 0));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    if (hours > 0) return `${hours}h ${String(minutes).padStart(2, '0')}min`;
+    if (minutes > 0) return `${minutes}min`;
+    return `${totalSeconds}s`;
+  };
+
+  const formatDateTime = (timestamp) => {
+    if (!timestamp) return '—';
+    return new Date(timestamp).toLocaleString('pt-BR');
+  };
+
+  const selectedPlaylistId = campaignFilters.playlistId || '';
+  const filteredMetrics = selectedPlaylistId
+    ? campaignMetrics.filter((item) => item.playlistId === selectedPlaylistId)
+    : campaignMetrics;
+  const filteredProofs = selectedPlaylistId
+    ? playbackProofs.filter((item) => item.playlistId === selectedPlaylistId)
+    : playbackProofs;
+
+  const allVideos = filteredMetrics.flatMap((campaign) =>
+    (campaign.videos || []).map((video) => ({
+      ...video,
+      playlistId: campaign.playlistId,
+      playlistName: campaign.playlistName,
+      date: campaign.date,
+    }))
+  );
+
+  const totalSeconds = allVideos.reduce((sum, video) => sum + Number(video.totalPlaybackSeconds || 0), 0);
+  const totalLoops = allVideos.reduce((sum, video) => sum + Number(video.loops || 0), 0);
+  const uniqueDevices = new Set(allVideos.flatMap((video) => Array.isArray(video.devices) ? video.devices : []));
+  const uniqueCampaigns = new Set(filteredMetrics.map((item) => item.playlistId).filter(Boolean));
+  const maxVideoSeconds = Math.max(1, ...allVideos.map((video) => Number(video.totalPlaybackSeconds || 0)));
+
+  const byHour = allVideos
+    .flatMap((video) => (video.hours || []).map((hour) => ({
+      hour: hour.hour || '—',
+      seconds: Number(hour.totalPlaybackSeconds || 0),
+      loops: Number(hour.loops || 0),
+    })))
+    .reduce((acc, item) => {
+      if (!acc[item.hour]) acc[item.hour] = { hour: item.hour, seconds: 0, loops: 0 };
+      acc[item.hour].seconds += item.seconds;
+      acc[item.hour].loops += item.loops;
+      return acc;
+    }, {});
+
+  const hourRanking = Object.values(byHour)
+    .sort((a, b) => b.seconds - a.seconds)
+    .slice(0, 8);
+  const maxHourSeconds = Math.max(1, ...hourRanking.map((item) => item.seconds));
+
+  const byCity = allVideos
+    .flatMap((video) => (video.cities || []).map((city) => ({
+      label: [city.city, city.state].filter(Boolean).join(' - ') || 'Cidade nao informada',
+      seconds: Number(city.totalPlaybackSeconds || 0),
+      loops: Number(city.loops || 0),
+    })))
+    .reduce((acc, item) => {
+      if (!acc[item.label]) acc[item.label] = { label: item.label, seconds: 0, loops: 0 };
+      acc[item.label].seconds += item.seconds;
+      acc[item.label].loops += item.loops;
+      return acc;
+    }, {});
+
+  const cityRanking = Object.values(byCity)
+    .sort((a, b) => b.seconds - a.seconds)
+    .slice(0, 8);
+  const maxCitySeconds = Math.max(1, ...cityRanking.map((item) => item.seconds));
+
+  const byNeighborhood = allVideos
+    .flatMap((video) => (video.neighborhoods || []).map((item) => ({
+      label: item.neighborhood || 'Bairro nao informado',
+      city: item.city || '',
+      seconds: Number(item.totalPlaybackSeconds || 0),
+      loops: Number(item.loops || 0),
+    })))
+    .reduce((acc, item) => {
+      const key = `${item.label}_${item.city}`;
+      if (!acc[key]) acc[key] = { ...item, seconds: 0, loops: 0 };
+      acc[key].seconds += item.seconds;
+      acc[key].loops += item.loops;
+      return acc;
+    }, {});
+
+  const neighborhoodRanking = Object.values(byNeighborhood)
+    .sort((a, b) => b.seconds - a.seconds)
+    .slice(0, 8);
+  const maxNeighborhoodSeconds = Math.max(1, ...neighborhoodRanking.map((item) => item.seconds));
+
+  const videoRows = allVideos
+    .slice()
+    .sort((a, b) => Number(b.totalPlaybackSeconds || 0) - Number(a.totalPlaybackSeconds || 0))
+    .map((video) => {
+      const seconds = Number(video.totalPlaybackSeconds || 0);
+      const width = Math.max(4, Math.round((seconds / maxVideoSeconds) * 100));
+      return `
+        <tr>
+          <td><strong>${escapeHtml(video.videoName || video.videoId || '—')}</strong><div class="card-subtitle">${escapeHtml(video.playlistName || video.playlistId || '—')}</div></td>
+          <td>${escapeHtml(video.date || '—')}</td>
+          <td class="hours-cell">${formatDuration(seconds)}</td>
+          <td>${Number(video.loops || 0)}</td>
+          <td>${Array.isArray(video.devices) ? video.devices.length : 0}</td>
+          <td><div class="report-bar"><span style="width:${width}%"></span></div></td>
+        </tr>
+      `;
+    }).join('');
+
+  const rankingRows = (items, maxSeconds, labelTitle) => items.map((item, index) => {
+    const width = Math.max(4, Math.round((Number(item.seconds || 0) / maxSeconds) * 100));
+    return `
+      <div class="ranking-row">
+        <span class="ranking-position">${index + 1}</span>
+        <div class="ranking-main">
+          <strong>${escapeHtml(item.label || item.hour || '—')}</strong>
+          <span>${labelTitle === 'hour' ? `${escapeHtml(item.hour)}h` : escapeHtml(item.city || '')}</span>
+          <div class="report-bar"><span style="width:${width}%"></span></div>
+        </div>
+        <div class="ranking-value">
+          <strong>${formatDuration(item.seconds)}</strong>
+          <span>${Number(item.loops || 0)} loops</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const proofRows = filteredProofs.slice(0, 80).map((proof) => `
+    <tr>
+      <td><strong>${escapeHtml(proof.videoName || proof.videoId || '—')}</strong><div class="card-subtitle">${escapeHtml(proof.playlistName || proof.playlistId || '—')}</div></td>
+      <td>${escapeHtml(proof.deviceId || '—')}<div class="card-subtitle">${escapeHtml(proof.driver || 'Motorista nao informado')}</div></td>
+      <td>${formatDateTime(proof.startedAt)}</td>
+      <td>${formatDateTime(proof.endedAt)}</td>
+      <td class="hours-cell">${formatDuration(proof.durationSeconds)}</td>
+      <td>${escapeHtml(proof.endLocation?.city || '—')}<div class="card-subtitle">${escapeHtml(proof.endLocation?.neighborhood || '')}</div></td>
+      <td><span class="pill">${escapeHtml(proof.endReason || '—')}</span></td>
+    </tr>
+  `).join('');
+
+  const playlistOptions = playlists.map((playlist) => `
+    <option value="${escapeAttr(playlist.id)}" ${selectedPlaylistId === playlist.id ? 'selected' : ''}>${escapeHtml(playlist.name || playlist.id)}</option>
+  `).join('');
+
+  return layoutView(
+    'Relatórios de Campanha',
+    'Analise tempo exibido, loops, horários, regiões e comprovantes por vídeo.',
+    `
+      <section class="card report-toolbar">
+        <div class="filter-controls">
+          <select id="campaign-period" class="select">
+            <option value="today" ${campaignFilters.period === 'today' ? 'selected' : ''}>Hoje</option>
+            <option value="week" ${campaignFilters.period === 'week' ? 'selected' : ''}>Ultima semana</option>
+            <option value="month" ${campaignFilters.period === 'month' ? 'selected' : ''}>Este mes</option>
+            <option value="custom" ${campaignFilters.period === 'custom' ? 'selected' : ''}>Personalizado</option>
+          </select>
+          <input type="date" id="campaign-date-start" class="input campaign-custom-date" value="${escapeAttr(campaignFilters.startDate || getLocalDateString())}" />
+          <input type="date" id="campaign-date-end" class="input campaign-custom-date" value="${escapeAttr(campaignFilters.endDate || getLocalDateString())}" />
+          <select id="campaign-playlist" class="select">
+            <option value="">Todas as campanhas</option>
+            ${playlistOptions}
+          </select>
+          <button class="button primary" id="campaign-apply">Atualizar</button>
+          <button class="button secondary" id="campaign-export">Exportar Excel</button>
+        </div>
+      </section>
+
+      <section class="grid-4" style="margin-top: 16px;">
+        <article class="card"><div class="metric"><span class="metric-label">Tempo Exibido</span><strong class="metric-value">${formatDuration(totalSeconds)}</strong><span class="metric-trend success">Periodo selecionado</span></div></article>
+        <article class="card"><div class="metric"><span class="metric-label">Loops</span><strong class="metric-value">${totalLoops}</strong><span class="metric-trend">Exibicoes finalizadas</span></div></article>
+        <article class="card"><div class="metric"><span class="metric-label">Tablets</span><strong class="metric-value">${uniqueDevices.size}</strong><span class="metric-trend">Com comprovacao</span></div></article>
+        <article class="card"><div class="metric"><span class="metric-label">Campanhas</span><strong class="metric-value">${uniqueCampaigns.size}</strong><span class="metric-trend">Com exibicao</span></div></article>
+      </section>
+
+      <section class="grid-3" style="margin-top: 16px;">
+        <article class="card">
+          <div class="card-header"><div><h3 class="card-title">Melhores Horarios</h3><p class="card-subtitle">Tempo exibido por hora</p></div></div>
+          <div class="ranking-list">${hourRanking.length ? rankingRows(hourRanking, maxHourSeconds, 'hour') : '<p class="text-muted">Sem dados por horario</p>'}</div>
+        </article>
+        <article class="card">
+          <div class="card-header"><div><h3 class="card-title">Cidades</h3><p class="card-subtitle">Onde a campanha rodou</p></div></div>
+          <div class="ranking-list">${cityRanking.length ? rankingRows(cityRanking, maxCitySeconds, 'city') : '<p class="text-muted">Sem dados por cidade</p>'}</div>
+        </article>
+        <article class="card">
+          <div class="card-header"><div><h3 class="card-title">Bairros</h3><p class="card-subtitle">Regioes com mais exibicao</p></div></div>
+          <div class="ranking-list">${neighborhoodRanking.length ? rankingRows(neighborhoodRanking, maxNeighborhoodSeconds, 'neighborhood') : '<p class="text-muted">Sem dados por bairro</p>'}</div>
+        </article>
+      </section>
+
+      <section class="card" style="margin-top: 16px;">
+        <div class="card-header"><div><h3 class="card-title">Desempenho por Video</h3><p class="card-subtitle">Tempo exibido, loops e tablets alcancados</p></div></div>
+        ${videoRows ? `<div class="table-wrap"><table><thead><tr><th>Video</th><th>Data</th><th>Tempo</th><th>Loops</th><th>Tablets</th><th>Participacao</th></tr></thead><tbody>${videoRows}</tbody></table></div>` : '<div class="empty-state"><h3>Nenhuma metrica encontrada</h3><p>Os dados aparecem quando os tablets finalizarem exibicoes.</p></div>'}
+      </section>
+
+      <section class="card" style="margin-top: 16px;">
+        <div class="card-header"><div><h3 class="card-title">Comprovantes de Reproducao</h3><p class="card-subtitle">Ultimos 80 registros individuais do periodo</p></div></div>
+        ${proofRows ? `<div class="table-wrap"><table><thead><tr><th>Video</th><th>Tablet</th><th>Inicio</th><th>Fim</th><th>Duracao</th><th>Local</th><th>Fim</th></tr></thead><tbody>${proofRows}</tbody></table></div>` : '<div class="empty-state"><h3>Nenhum comprovante encontrado</h3><p>Os comprovantes sao gerados ao final de cada video exibido.</p></div>'}
       </section>
     `,
     '<button class="button ghost" data-action="logout">Sair</button>'
