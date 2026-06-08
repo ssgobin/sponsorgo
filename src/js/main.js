@@ -1377,6 +1377,8 @@ function bindConnectButtons() {
 
 function showConnectDeviceModal(deviceId) {
   const existingDevice = state.devices.find(d => d.id === deviceId);
+  const connectionRequest = state.connectionRequests.find(request => request.deviceId === deviceId || request.id === deviceId);
+  const modelLabel = connectionRequest?.model || connectionRequest?.deviceName || existingDevice?.model || existingDevice?.deviceName || '';
 
   const modal = document.createElement('div');
   modal.className = 'modal-overlay';
@@ -1385,6 +1387,7 @@ function showConnectDeviceModal(deviceId) {
       <span class="modal-icon info">🔗</span>
       <h3>Conectar Tablet</h3>
       <p>Configure o dispositivo: <strong>${escapeHtml(deviceId)}</strong></p>
+      ${modelLabel ? `<p class="text-muted">Modelo detectado: ${escapeHtml(modelLabel)}</p>` : ''}
       <form id="connect-device-form">
         <div class="form-group">
           <label>Nome do Tablet</label>
@@ -1421,6 +1424,8 @@ function showConnectDeviceModal(deviceId) {
       battery: null,
       currentVideo: null,
       lastSeen: null,
+      deviceName: modelLabel || deviceId,
+      model: modelLabel || null,
       createdAt: new Date(),
     };
 

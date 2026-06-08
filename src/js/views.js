@@ -825,12 +825,13 @@ export function connectionsView(data) {
 
   const deviceRows = pendingRequests.map((request) => {
     const existingDevice = devices.find(d => d.id === request.deviceId);
+    const modelLabel = request.model || request.deviceName || 'Modelo nao informado';
     return `
       <div class="connection-card" style="background: #1a1a2e; padding: 16px; margin-bottom: 12px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #333;">
         <div>
           <h4 style="margin: 0 0 8px; color: #00ff00;">${escapeHtml(request.deviceId)}</h4>
           <p style="margin: 0; color: #aaa; font-size: 13px;">
-            Solicitado: ${formatDate(request.createdAt)}
+            ${escapeHtml(modelLabel)} • Solicitado: ${formatDate(request.createdAt)}
           </p>
         </div>
         <button class="button primary" data-connect="${escapeAttr(request.deviceId)}" ${existingDevice && existingDevice.name ? 'disabled' : ''}>
@@ -846,7 +847,7 @@ export function connectionsView(data) {
     <div class="list-item" data-device-id="${escapeAttr(device.id)}">
       <div>
         <p class="list-item-title">${escapeHtml(device.name || '—')}</p>
-        <p class="list-item-subtitle">${escapeHtml(device.id)} • ${escapeHtml(device.car || 'Sem veículo')} • ${escapeHtml(device.driver || 'Sem motorista')}</p>
+        <p class="list-item-subtitle">${escapeHtml(device.id)} • ${escapeHtml(device.model || device.deviceName || 'Modelo nao informado')} • ${escapeHtml(device.car || 'Sem veículo')} • ${escapeHtml(device.driver || 'Sem motorista')}</p>
       </div>
       <span class="pill active">Conectado</span>
     </div>
