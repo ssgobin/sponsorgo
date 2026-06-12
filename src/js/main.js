@@ -1,6 +1,6 @@
 ﻿import { loginTemplate, appTemplate } from './templates.js';
 import { dashboardView, devicesView, videosView, playlistsView, geofencingView, monitorView, mapView, settingsView, connectionsView, hoursView, campaignReportsView, downloadAppView } from './views.js';
-import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylistWithAssignments, updatePlaylistWithAssignments, softDeletePlaylistWithAssignments, deleteVideoAndPrunePlaylists, fetchCollection, fetchLocationTrack, deleteDocument, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, approveConnectionWithDevice, addGeofenceRule } from './firebase.js';
+import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylistWithAssignments, updatePlaylistWithAssignments, softDeletePlaylistWithAssignments, deleteVideoAndPrunePlaylists, fetchCollection, deleteDocument, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, approveConnectionWithDevice, addGeofenceRule } from './firebase.js';
 import { hasAppwriteConfig, uploadVideo, deleteVideoFile, getVideoFileUrls } from './appwrite.js';
 import { exportToExcel } from './export-excel.js';
 import { fetchTodayHours, fetchMonthHours, fetchActiveAlerts, fetchHoursByDateRange, fetchHoursByDevice, dismissAlert, checkAndCreateAlerts, exportHoursToExcel, initHoursFirebase, subscribeToHours, DAILY_GOAL_HOURS } from './firebase-hours.js';
@@ -45,7 +45,7 @@ const state = {
   mapFilters: {
     deviceId: 'all',
     date: getLocalDateString(),
-    showRoutes: true,
+    showRoutes: false,
   },
   mapRoutePoints: [],
   listFilters: {
@@ -234,9 +234,36 @@ function getFilteredGeofenceRules() {
 function getTimestampMs(value) {
   if (!value) return 0;
   if (value.toDate) return value.toDate().getTime();
+  if (typeof value === 'object' && typeof value.seconds === 'number') return value.seconds * 1000;
   if (typeof value === 'number') return value;
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeCoordinate(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const parsed = Number(String(value).replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getDeviceLocation(device = {}) {
+  const location = device.location || device.currentLocation || device.lastLocation || device.gps || {};
+  const latitude = normalizeCoordinate(
+    location.latitude ?? location.lat ?? device.latitude ?? device.lat
+  );
+  const longitude = normalizeCoordinate(
+    location.longitude ?? location.lng ?? location.lon ?? location.long ?? device.longitude ?? device.lng ?? device.lon ?? device.long
+  );
+
+  if (latitude == null || longitude == null) return null;
+
+  return {
+    latitude,
+    longitude,
+    accuracy: normalizeCoordinate(location.accuracy ?? device.accuracy) || 0,
+    timestamp: location.timestamp ?? location.updatedAt ?? location.lastSeen ?? device.locationTimestamp ?? device.lastHeartbeat ?? device.lastSeen ?? device.updatedAt,
+  };
 }
 
 function normalizeDeviceStatus(device, now = Date.now()) {
@@ -344,7 +371,7 @@ function buildOperationalAlerts(savedAlerts = []) {
       });
     }
 
-    if (!device.location || device.location.latitude == null || device.location.longitude == null) {
+    if (!getDeviceLocation(device)) {
       derivedAlerts.push({
         id: `gps-${device.id}`,
         type: 'gps',
@@ -695,8 +722,11 @@ function renderView() {
   bindMapView();
   
   if (state.route === 'map') {
-    window.mapDevicesData = buildMapDevicesData(state.devices);
-    window.mapRoutePointsData = buildMapRoutePointsData(state.mapRoutePoints);
+    const selectedDevices = state.mapFilters.deviceId === 'all'
+      ? state.devices
+      : state.devices.filter((device) => device.id === state.mapFilters.deviceId);
+    window.mapDevicesData = buildMapDevicesData(selectedDevices);
+    window.mapRoutePointsData = [];
     console.log('renderView - route is map, scheduling initMap');
     setTimeout(initMap, 500);
   }
@@ -726,35 +756,24 @@ function shouldRenderRealtimeUpdate(routes = []) {
 
 function buildMapDevicesData(devices) {
   return devices
-    .filter(d => d.location && d.location.latitude != null && d.location.longitude != null)
-    .map(d => ({
-      id: d.id,
-      name: d.name || d.id,
-      car: d.car || '',
-      driver: d.driver || '',
-      status: d.status || 'offline',
-      lat: d.location.latitude,
-      lng: d.location.longitude,
-      accuracy: d.location.accuracy || 0,
-      lastUpdate: d.location.timestamp ? new Date(d.location.timestamp).toLocaleString('pt-BR') : '—'
-    }));
-}
+    .map((device) => {
+      const location = getDeviceLocation(device);
+      if (!location) return null;
 
-function buildMapRoutePointsData(points) {
-  return (points || [])
-    .map((point) => ({
-      deviceId: point.deviceId || '',
-      deviceName: point.deviceName || '',
-      car: point.car || '',
-      driver: point.driver || '',
-      lat: point.latitude,
-      lng: point.longitude,
-      timestamp: point.timestamp,
-      neighborhood: point.neighborhood || '',
-      city: point.city || '',
-      state: point.state || '',
-    }))
-    .filter((point) => point.lat != null && point.lng != null);
+      const timestampMs = getTimestampMs(location.timestamp);
+      return {
+        id: device.id,
+        name: device.name || device.id,
+        car: device.car || '',
+        driver: device.driver || '',
+        status: device.status || 'offline',
+        lat: location.latitude,
+        lng: location.longitude,
+        accuracy: location.accuracy,
+        lastUpdate: timestampMs ? new Date(timestampMs).toLocaleString('pt-BR') : '—'
+      };
+    })
+    .filter(Boolean);
 }
 
 const DEFAULT_CENTER = [-22.7391, -47.3304];
@@ -826,68 +845,14 @@ function updateMapMarkers() {
   }
   
   const devices = window.mapDevicesData || [];
-  const routePoints = window.mapRoutePointsData || [];
-  const showRoutes = window.mapShowRoutes !== false;
   
-  if (devices.length === 0 && (!showRoutes || routePoints.length === 0)) {
+  if (devices.length === 0) {
     console.log('No device data');
     window.map.setView(DEFAULT_CENTER, 13);
     return;
   }
   
   const bounds = [];
-
-  if (showRoutes && routePoints.length > 0) {
-    const groupedRoutes = routePoints.reduce((groups, point) => {
-      const key = point.deviceId || 'sem_dispositivo';
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(point);
-      return groups;
-    }, {});
-
-    Object.values(groupedRoutes).forEach((points) => {
-      const orderedPoints = points
-        .slice()
-        .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0));
-
-      if (orderedPoints.length > 1) {
-        const latLngs = orderedPoints.map((point) => [point.lat, point.lng]);
-        window.L.polyline(latLngs, {
-          color: '#1f6feb',
-          weight: 5,
-          opacity: 0.85,
-          lineJoin: 'round',
-          lineCap: 'round',
-        }).addTo(window.mapRouteLayer);
-
-        const first = orderedPoints[0];
-        const last = orderedPoints[orderedPoints.length - 1];
-        const routeLabel = first.car || first.deviceName || first.deviceId || 'Rota';
-        window.L.circleMarker([first.lat, first.lng], {
-          radius: 6,
-          color: '#1f8f5f',
-          fillColor: '#1f8f5f',
-          fillOpacity: 1,
-        }).addTo(window.mapRouteLayer).bindPopup(`Inicio da rota - ${escapeHtml(routeLabel)}`);
-        window.L.circleMarker([last.lat, last.lng], {
-          radius: 6,
-          color: '#1f6feb',
-          fillColor: '#1f6feb',
-          fillOpacity: 1,
-        }).addTo(window.mapRouteLayer).bindPopup(`Ultimo ponto - ${escapeHtml(routeLabel)}`);
-        latLngs.forEach((point) => bounds.push(point));
-      } else if (orderedPoints.length === 1) {
-        const point = orderedPoints[0];
-        window.L.circleMarker([point.lat, point.lng], {
-          radius: 7,
-          color: '#1f6feb',
-          fillColor: '#1f6feb',
-          fillOpacity: 1,
-        }).addTo(window.mapRouteLayer).bindPopup('Ponto unico da rota');
-        bounds.push([point.lat, point.lng]);
-      }
-    });
-  }
   
   devices.forEach((device) => {
     if (device.lat != null && device.lng != null) {
@@ -942,72 +907,24 @@ async function bindMapView() {
   if (state.route !== 'map') return;
 
   const deviceFilter = document.getElementById('map-device-filter');
-  const dateFilter = document.getElementById('map-date-filter');
-  const routeToggle = document.getElementById('map-route-toggle');
-  const status = document.getElementById('map-route-status');
 
-  if (!deviceFilter || !dateFilter) return;
+  if (!deviceFilter) return;
 
-  const loadRoute = async () => {
+  const updateMapFilter = () => {
     const deviceId = deviceFilter.value;
-    const date = dateFilter.value || getLocalDateString();
-    const showRoutes = routeToggle ? routeToggle.checked : state.mapFilters.showRoutes !== false;
-    state.mapFilters = { deviceId, date, showRoutes };
-    window.mapShowRoutes = showRoutes;
+    state.mapFilters = { ...state.mapFilters, deviceId, showRoutes: false };
+    const selectedDevices = deviceId === 'all'
+      ? state.devices
+      : state.devices.filter((device) => device.id === deviceId);
 
-    if (!deviceId || !hasFirebaseConfig) {
-      state.mapRoutePoints = [];
-      window.mapRoutePointsData = [];
-      if (status) status.textContent = showRoutes ? 'Nenhuma rota carregada' : 'Linhas escondidas';
-      updateMapMarkers();
-      return;
-    }
-
-    if (!showRoutes) {
-      window.mapRoutePointsData = [];
-      if (status) status.textContent = 'Linhas escondidas';
-      updateMapMarkers();
-      return;
-    }
-
-    if (status) status.textContent = 'Carregando rota...';
-    try {
-      const selectedDevices = deviceId === 'all'
-        ? state.devices.filter((device) => device.id)
-        : state.devices.filter((device) => device.id === deviceId);
-      const trackGroups = await Promise.all(selectedDevices.map(async (device) => {
-        const points = await fetchLocationTrack(device.id, date);
-        return points.map((point) => ({
-          ...point,
-          deviceId: point.deviceId || device.id,
-          deviceName: device.name || device.id,
-          car: device.car || '',
-          driver: point.driver || device.driver || '',
-        }));
-      }));
-      const points = trackGroups.flat();
-      state.mapRoutePoints = points;
-      window.mapRoutePointsData = buildMapRoutePointsData(points);
-      updateMapMarkers();
-      if (status) {
-        status.textContent = points.length > 0
-          ? `${points.length} pontos carregados`
-          : 'Sem pontos para esta data';
-      }
-    } catch (error) {
-      console.error('Erro ao carregar rota:', error);
-      state.mapRoutePoints = [];
-      window.mapRoutePointsData = [];
-      updateMapMarkers();
-      if (status) status.textContent = 'Erro ao carregar rota';
-      showToast('Erro no mapa', 'Nao foi possivel carregar a rota do carro.', 'error');
-    }
+    window.mapDevicesData = buildMapDevicesData(selectedDevices);
+    window.mapRoutePointsData = [];
+    window.mapShowRoutes = false;
+    updateMapMarkers();
   };
 
-  deviceFilter.addEventListener('change', loadRoute);
-  dateFilter.addEventListener('change', loadRoute);
-  routeToggle?.addEventListener('change', loadRoute);
-  await loadRoute();
+  deviceFilter.addEventListener('change', updateMapFilter);
+  updateMapFilter();
 }
 
 function bindLogin() {
@@ -1946,7 +1863,10 @@ function updateDeviceStatusUI(devices) {
   if (!view) return;
 
   if (state.route === 'map') {
-    window.mapDevicesData = buildMapDevicesData(devices);
+    const selectedDevices = state.mapFilters.deviceId === 'all'
+      ? devices
+      : devices.filter((device) => device.id === state.mapFilters.deviceId);
+    window.mapDevicesData = buildMapDevicesData(selectedDevices);
     
     console.log('updateDeviceStatusUI - map data updated, scheduling initMap');
     setTimeout(initMap, 500);

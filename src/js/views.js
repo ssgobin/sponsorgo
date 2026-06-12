@@ -27,6 +27,22 @@ function getLocalDateString(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+function normalizeCoordinate(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const parsed = Number(String(value).replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasDeviceLocation(device = {}) {
+  const location = device.location || device.currentLocation || device.lastLocation || device.gps || {};
+  const latitude = normalizeCoordinate(location.latitude ?? location.lat ?? device.latitude ?? device.lat);
+  const longitude = normalizeCoordinate(
+    location.longitude ?? location.lng ?? location.lon ?? location.long ?? device.longitude ?? device.lng ?? device.lon ?? device.long
+  );
+  return latitude != null && longitude != null;
+}
+
 function formatDate(timestamp) {
   if (!timestamp) return '—';
   if (typeof timestamp === 'string') return timestamp;
@@ -617,9 +633,8 @@ export function monitorView(data) {
 }
 
 export function mapView(data) {
-  const devicesWithLocation = data.devices.filter(d => d.location && d.location.latitude != null && d.location.longitude != null);
+  const devicesWithLocation = data.devices.filter(hasDeviceLocation);
   const mapFilters = data.mapFilters || {};
-  const routePoints = data.mapRoutePoints || [];
   const selectedDevice = data.devices.find((device) => device.id === mapFilters.deviceId);
   const selectedLabel = mapFilters.deviceId === 'all'
     ? 'Todos os carros'
@@ -627,13 +642,13 @@ export function mapView(data) {
   
   return layoutView(
     'Mapa',
-    'Visualize a localização atual e o caminho percorrido pelos carros.',
+    'Visualize a localização atual dos carros.',
     `
       <section class="card" style="margin-bottom: 20px;">
         <div class="card-header">
           <div>
-            <h3 class="card-title">Rota do Carro</h3>
-            <p class="card-subtitle">Selecione um tablet e uma data para ver a linha azul por onde ele passou.</p>
+            <h3 class="card-title">Localização dos Carros</h3>
+            <p class="card-subtitle">Selecione um tablet para ver a posição atual enviada pelo banco de dados.</p>
           </div>
           <div class="filter-controls">
             <select id="map-device-filter" class="select">
@@ -644,17 +659,12 @@ export function mapView(data) {
                 </option>
               `).join('') : '<option value="">Nenhum tablet</option>'}
             </select>
-            <input type="date" id="map-date-filter" class="input" value="${escapeAttr(mapFilters.date || getLocalDateString())}" />
-            <label class="toggle-control">
-              <input type="checkbox" id="map-route-toggle" ${mapFilters.showRoutes === false ? '' : 'checked'} />
-              <span>Mostrar linhas</span>
-            </label>
           </div>
         </div>
         <div class="map-route-summary">
           <span><strong>${escapeHtml(selectedLabel)}</strong></span>
           <span>${escapeHtml(mapFilters.deviceId === 'all' ? `${data.devices.length} carros cadastrados` : (selectedDevice?.car || 'Veiculo nao informado'))}</span>
-          <span id="map-route-status">${mapFilters.showRoutes === false ? 'Linhas escondidas' : (routePoints.length > 0 ? `${routePoints.length} pontos carregados` : 'Nenhuma rota carregada')}</span>
+          <span>${devicesWithLocation.length} com GPS</span>
         </div>
       </section>
       <section class="card" style="padding: 0; overflow: hidden;">
@@ -677,9 +687,9 @@ export function mapView(data) {
         </article>
         <article class="card">
           <div class="metric">
-            <span class="metric-label">Pontos da Rota</span>
-            <strong class="metric-value">${routePoints.length}</strong>
-            <span class="metric-trend">Linha azul no mapa</span>
+            <span class="metric-label">Offline</span>
+            <strong class="metric-value">${devicesWithLocation.filter(d => d.status === 'offline').length}</strong>
+            <span class="metric-trend">Ultima posicao salva</span>
           </div>
         </article>
       </section>
