@@ -1,6 +1,5 @@
 import { Client, Storage, ID } from 'appwrite';
 import { appwriteConfig as awConfig } from './config.js';
-import { compressVideoFile } from './video-compression.js';
 
 const appwriteConfig = awConfig;
 
@@ -35,16 +34,10 @@ export function getVideoFileUrls(fileId) {
   };
 }
 
-export async function uploadVideo(file, onProgress, onCompressionStatus) {
+export async function uploadVideo(file, onProgress) {
   assertStorageReady();
 
-  const compression = await compressVideoFile(file, onCompressionStatus);
-
-  if (!compression.compressed) {
-    throw new Error('Nao foi possivel reduzir o tamanho do video selecionado. Tente outro arquivo ou um video em maior qualidade.');
-  }
-
-  const uploaded = await storage.createFile(bucketId, ID.unique(), compression.file, undefined, onProgress);
+  const uploaded = await storage.createFile(bucketId, ID.unique(), file, undefined, onProgress);
   const urls = getVideoFileUrls(uploaded.$id);
 
   return {
@@ -52,9 +45,6 @@ export async function uploadVideo(file, onProgress, onCompressionStatus) {
     fileName: uploaded.name,
     sizeOriginal: uploaded.sizeOriginal,
     mimeType: uploaded.mimeType,
-    originalSizeBeforeCompression: compression.originalSize,
-    compressedSize: compression.compressedSize,
-    wasCompressed: compression.compressed,
     ...urls,
   };
 }

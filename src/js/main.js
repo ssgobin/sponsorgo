@@ -1709,7 +1709,7 @@ function bindVideoForm() {
   const progressText = document.getElementById('upload-progress-text');
   const progressPercent = document.getElementById('upload-progress-percent');
   const progressSteps = Array.from(document.querySelectorAll('#upload-progress-steps [data-stage]'));
-  const progressStageOrder = ['prepare', 'compress', 'upload', 'save'];
+  const progressStageOrder = ['prepare', 'upload', 'save'];
 
   const setUploadProgress = (progress, label = 'Preparando envio...', stage = 'prepare') => {
     const value = Math.max(0, Math.min(100, Math.round(progress || 0)));
@@ -1764,22 +1764,8 @@ function bindVideoForm() {
 
       if (hasAppwriteConfig && file) {
         const upload = await uploadVideo(file, (progress) => {
-          const uploadProgress = 65 + ((progress.progress || 0) * 0.3);
+          const uploadProgress = 10 + ((progress.progress || 0) * 0.85);
           setUploadProgress(uploadProgress, 'Enviando vídeo...', 'upload');
-        }, (status) => {
-          if (status.stage === 'loading') {
-            const loadProgress = 10 + ((status.progress || 0) * 0.1);
-            setUploadProgress(loadProgress, 'Carregando compressor...', 'compress');
-            return;
-          }
-
-          if (status.stage === 'skipped') {
-            setUploadProgress(64, 'Compressor indisponível. Enviando original...', 'upload');
-            return;
-          }
-
-          const compressionProgress = 20 + ((status.progress || 0) * 0.45);
-          setUploadProgress(compressionProgress, 'Comprimindo vídeo...', 'compress');
         });
         uploadedFileId = upload.fileId;
         uploadedMeta = {
@@ -1789,9 +1775,6 @@ function bindVideoForm() {
           mimeType: upload.mimeType,
           viewUrl: upload.viewUrl,
           downloadUrl: upload.downloadUrl,
-          originalSize: upload.originalSizeBeforeCompression,
-          compressedSize: upload.compressedSize,
-          wasCompressed: upload.wasCompressed,
         };
       }
 
