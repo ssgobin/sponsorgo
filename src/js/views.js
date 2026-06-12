@@ -57,6 +57,36 @@ function formatDeviceStatus(status) {
   return status || '—';
 }
 
+function getDeviceCurrentVideoTitle(device, videos = []) {
+  const currentVideo = device?.currentVideo;
+  const candidates = [
+    device?.currentVideoId,
+    typeof currentVideo === 'object' ? currentVideo?.id : currentVideo,
+    typeof currentVideo === 'object' ? currentVideo?.title : '',
+    typeof currentVideo === 'object' ? currentVideo?.name : '',
+    device?.currentVideoName,
+    device?.videoName,
+    device?.videoId,
+    device?.playingVideoName,
+    device?.playingVideoId,
+    device?.nowPlaying,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const text = String(candidate);
+    const video = videos.find((item) => (
+      item.id === text ||
+      item.fileId === text ||
+      item.title === text ||
+      item.name === text
+    ));
+    if (video) return video.title || video.name || text;
+    if (!/^[a-z0-9_-]{12,}$/i.test(text)) return text;
+  }
+
+  return '—';
+}
+
 function countItems(value) {
   return Array.isArray(value) ? value.length : Number(value) || 0;
 }
@@ -114,7 +144,7 @@ export function dashboardView(data) {
       <td><strong>${escapeHtml(device.name || '—')}</strong><div class="card-subtitle">${escapeHtml(device.id || '—')}</div></td>
       <td>${escapeHtml(device.car || '—')}</td>
       <td><span class="status ${safeCssClass(device.status, 'offline')}">${formatDeviceStatus(device.status)}</span></td>
-      <td>${escapeHtml(getVideoTitle(device.currentVideoId) || device.currentVideo || '—')}</td>
+      <td data-current-video>${escapeHtml(getDeviceCurrentVideoTitle(device, videos))}</td>
       <td>${formatDate(lastContact) || '—'}</td>
       <td>${device.battery >= 0 ? `${device.battery}%` : '—'}</td>
       <td style="width:80px;">
@@ -196,11 +226,13 @@ export function devicesView(data) {
   const allowManualDeviceForm = Boolean(data.isDemo);
   const filters = data.listFilters?.devices || { search: '', status: '' };
   const devices = data.filteredDevices || data.devices;
+  const videos = data.videos || [];
   const items = devices.length > 0 ? devices.map((device) => `
     <div class="list-item" data-device-id="${escapeAttr(device.id)}">
       <div>
         <p class="list-item-title">${escapeHtml(device.name || '—')}</p>
         <p class="list-item-subtitle">${escapeHtml(device.id || '—')} • ${escapeHtml(device.car || 'Sem veículo')} • ${escapeHtml(device.driver || 'Sem motorista')}</p>
+        <p class="list-item-subtitle">Vídeo atual: <span data-current-video>${escapeHtml(getDeviceCurrentVideoTitle(device, videos))}</span></p>
       </div>
       <div class="row wrap" style="align-items:center;gap:8px;">
         <span class="status ${safeCssClass(device.status, 'offline')}">${formatDeviceStatus(device.status)}</span>
@@ -293,7 +325,19 @@ export function videosView(data) {
                 <label for="video-file" class="file-label"><span class="file-icon">▣</span><span class="file-text" id="file-name">Clique para selecionar um vídeo</span></label>
               </div>
             </div>
-            <div class="upload-progress" id="upload-progress" hidden><div class="upload-progress-track"><span id="upload-progress-bar"></span></div><span id="upload-progress-text">Aguardando arquivo...</span></div>
+            <div class="upload-progress" id="upload-progress" hidden>
+              <div class="upload-progress-header">
+                <span id="upload-progress-text">Aguardando arquivo...</span>
+                <strong id="upload-progress-percent">0%</strong>
+              </div>
+              <div class="upload-progress-track"><span id="upload-progress-bar"></span></div>
+              <div class="upload-progress-steps" id="upload-progress-steps" aria-label="Etapas do envio">
+                <span data-stage="prepare">Preparar</span>
+                <span data-stage="compress">Comprimir</span>
+                <span data-stage="upload">Enviar</span>
+                <span data-stage="save">Salvar</span>
+              </div>
+            </div>
             <button class="button primary" type="submit">Enviar Vídeo</button>
           </form>
         </article>
@@ -492,12 +536,6 @@ export function geofencingView(data) {
   );
 }
 export function monitorView(data) {
-  const getVideoTitle = (videoId) => {
-    if (!videoId) return '—';
-    const video = data.videos?.find(v => v.id === videoId);
-    return video?.title || videoId;
-  };
-
   const rows = data.devices.length > 0 ? data.devices.map((device) => {
     const lastContact = device.lastHeartbeat 
       ? (device.lastHeartbeat.toDate ? device.lastHeartbeat.toDate() : new Date(device.lastHeartbeat))
@@ -506,7 +544,7 @@ export function monitorView(data) {
     <tr data-device-id="${escapeAttr(device.id)}">
       <td><strong>${escapeHtml(device.name || '—')}</strong></td>
       <td><span class="status ${safeCssClass(device.status, 'offline')}">${formatDeviceStatus(device.status)}</span></td>
-      <td>${escapeHtml(getVideoTitle(device.currentVideoId) || device.currentVideo || '—')}</td>
+      <td data-current-video>${escapeHtml(getDeviceCurrentVideoTitle(device, data.videos || []))}</td>
       <td>${formatDate(lastContact) || '—'}</td>
       <td>${device.battery >= 0 ? `${device.battery}%` : '—'}</td>
       <td style="width:50px;"><button class="button-edit" data-edit="tablet" data-id="${escapeAttr(device.id)}" title="Editar">✎</button></td>

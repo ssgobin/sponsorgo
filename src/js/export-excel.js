@@ -11,7 +11,7 @@
     );
   } else {
     sheets.push(
-      { name: 'Tablets', rows: createDevicesRows(state.devices || []) },
+      { name: 'Tablets', rows: createDevicesRows(state.devices || [], state.videos || []) },
       { name: 'Videos', rows: createVideosRows(state.videos || []) },
       { name: 'Playlists', rows: createPlaylistsRows(state.playlists || [], state.videos || [], state.devices || []) },
       { name: 'Resumo', rows: createSummaryRows(state.metrics || {}) }
@@ -21,7 +21,7 @@
   downloadWorkbook(sheets, `${fileName}-${dateStr}.xls`);
 }
 
-function createDevicesRows(devices) {
+function createDevicesRows(devices, videos) {
   return devices.map((d, index) => ({
     '#': index + 1,
     'Nome': d.name || '',
@@ -31,9 +31,39 @@ function createDevicesRows(devices) {
     'Status': d.status === 'online' ? 'Ativo' : 'Parado',
     'Ultimo Contato': formatDateTime(d.lastHeartbeat),
     'Bateria (%)': d.battery ?? '-',
-    'Video Atual': d.currentVideo || d.currentVideoId || '-',
+    'Video Atual': getDeviceCurrentVideoTitle(d, videos),
     'Playlist': d.playlistName || d.playlistId || '-',
   }));
+}
+
+function getDeviceCurrentVideoTitle(device, videos = []) {
+  const currentVideo = device?.currentVideo;
+  const candidates = [
+    device?.currentVideoId,
+    typeof currentVideo === 'object' ? currentVideo?.id : currentVideo,
+    typeof currentVideo === 'object' ? currentVideo?.title : '',
+    typeof currentVideo === 'object' ? currentVideo?.name : '',
+    device?.currentVideoName,
+    device?.videoName,
+    device?.videoId,
+    device?.playingVideoName,
+    device?.playingVideoId,
+    device?.nowPlaying,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const text = String(candidate);
+    const video = videos.find((item) => (
+      item.id === text ||
+      item.fileId === text ||
+      item.title === text ||
+      item.name === text
+    ));
+    if (video) return video.title || video.name || text;
+    if (!/^[a-z0-9_-]{12,}$/i.test(text)) return text;
+  }
+
+  return '-';
 }
 
 function createVideosRows(videos) {

@@ -956,7 +956,7 @@ tr:hover td {
 .upload-progress {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   padding: 12px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -984,10 +984,78 @@ tr:hover td {
   transition: width 0.2s ease;
 }
 
-.upload-progress > span {
+.upload-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.upload-progress-header span {
   font-size: 13px;
   color: var(--text-secondary);
   font-weight: 600;
+}
+
+.upload-progress-header strong {
+  flex: 0 0 auto;
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.upload-progress-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.upload-progress-steps span {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 6px 6px 6px 22px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.upload-progress-steps span::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  width: 8px;
+  height: 8px;
+  background: var(--border);
+  border-radius: 999px;
+}
+
+.upload-progress-steps span.is-active {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.upload-progress-steps span.is-active::before {
+  background: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.upload-progress-steps span.is-complete {
+  color: var(--success);
+  border-color: var(--success);
+  background: var(--success-light);
+}
+
+.upload-progress-steps span.is-complete::before {
+  background: var(--success);
 }
 
 .checkbox-list {

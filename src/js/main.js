@@ -239,6 +239,59 @@ function getTimestampMs(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function normalizeDeviceStatus(device, now = Date.now()) {
+  const rawStatus = String(device?.status || '').trim().toLowerCase();
+  const explicitOnlineStatuses = new Set(['online', 'active', 'ativo', 'rodando', 'running']);
+  const explicitOfflineStatuses = new Set(['offline', 'inactive', 'inativo', 'parado', 'stopped']);
+
+  if (explicitOnlineStatuses.has(rawStatus)) return 'online';
+  if (explicitOfflineStatuses.has(rawStatus)) return 'offline';
+
+  const lastHeartbeatMs = getTimestampMs(device?.lastHeartbeat || device?.lastSeen || device?.updatedAt);
+  const ONLINE_THRESHOLD = 2 * 60 * 1000;
+
+  if (!lastHeartbeatMs) return 'offline';
+  return now - lastHeartbeatMs < ONLINE_THRESHOLD ? 'online' : 'offline';
+}
+
+function normalizeDevicesStatus(devicesData) {
+  const now = Date.now();
+  return devicesData.map((device) => ({
+    ...device,
+    status: normalizeDeviceStatus(device, now),
+  }));
+}
+
+function getDeviceCurrentVideoTitle(device, videos = state.videos) {
+  const currentVideo = device?.currentVideo;
+  const candidates = [
+    device?.currentVideoId,
+    typeof currentVideo === 'object' ? currentVideo?.id : currentVideo,
+    typeof currentVideo === 'object' ? currentVideo?.title : '',
+    typeof currentVideo === 'object' ? currentVideo?.name : '',
+    device?.currentVideoName,
+    device?.videoName,
+    device?.videoId,
+    device?.playingVideoName,
+    device?.playingVideoId,
+    device?.nowPlaying,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const text = String(candidate);
+    const video = videos.find((item) => (
+      item.id === text ||
+      item.fileId === text ||
+      item.title === text ||
+      item.name === text
+    ));
+    if (video) return video.title || video.name || text;
+    if (!/^[a-z0-9_-]{12,}$/i.test(text)) return text;
+  }
+
+  return '—';
+}
+
 function getAssignedDeviceIds() {
   const ids = new Set();
   state.playlists.forEach((playlist) => {
@@ -497,20 +550,7 @@ async function loadData() {
       fetchActiveAlerts()
     ]);
 
-    const now = Date.now();
-    const ONLINE_THRESHOLD = 2 * 60 * 1000;
-
-    const devicesWithStatus = devicesData.map(d => {
-      const lastHeartbeat = d.lastHeartbeat;
-      let computedStatus = 'offline';
-      
-      if (lastHeartbeat) {
-        const timestamp = lastHeartbeat.toDate ? lastHeartbeat.toDate().getTime() : (typeof lastHeartbeat === 'number' ? lastHeartbeat : 0);
-        computedStatus = (now - timestamp < ONLINE_THRESHOLD) ? 'online' : 'offline';
-      }
-      
-      return { ...d, status: computedStatus };
-    });
+    const devicesWithStatus = normalizeDevicesStatus(devicesData);
 
     state.devices = devicesWithStatus;
     state.alerts = buildOperationalAlerts(state.savedAlerts);
@@ -660,6 +700,28 @@ function renderView() {
     console.log('renderView - route is map, scheduling initMap');
     setTimeout(initMap, 500);
   }
+}
+
+function isPlaylistFormBeingEdited() {
+  const playlistForm = document.getElementById('playlist-form');
+  const editPlaylistForm = document.getElementById('edit-playlist-form');
+  const activeElement = document.activeElement;
+
+  if (editPlaylistForm) return true;
+
+  if (!playlistForm) return false;
+
+  const activeInsideForm = activeElement && playlistForm.contains(activeElement);
+  const hasName = Boolean(playlistForm.querySelector('[name="name"]')?.value?.trim());
+  const hasCheckedItems = Boolean(playlistForm.querySelector('input[type="checkbox"]:checked'));
+
+  return activeInsideForm || hasName || hasCheckedItems;
+}
+
+function shouldRenderRealtimeUpdate(routes = []) {
+  if (!routes.includes(state.route)) return false;
+  if (state.route === 'playlists' && isPlaylistFormBeingEdited()) return false;
+  return true;
 }
 
 function buildMapDevicesData(devices) {
@@ -1645,18 +1707,33 @@ function bindVideoForm() {
   const progressEl = document.getElementById('upload-progress');
   const progressBar = document.getElementById('upload-progress-bar');
   const progressText = document.getElementById('upload-progress-text');
+  const progressPercent = document.getElementById('upload-progress-percent');
+  const progressSteps = Array.from(document.querySelectorAll('#upload-progress-steps [data-stage]'));
+  const progressStageOrder = ['prepare', 'compress', 'upload', 'save'];
 
-  const setUploadProgress = (progress, label = 'Preparando envio...') => {
+  const setUploadProgress = (progress, label = 'Preparando envio...', stage = 'prepare') => {
     const value = Math.max(0, Math.min(100, Math.round(progress || 0)));
+    const activeIndex = progressStageOrder.indexOf(stage);
     if (progressEl) progressEl.hidden = false;
     if (progressBar) progressBar.style.width = `${value}%`;
-    if (progressText) progressText.textContent = `${label} ${value}%`;
+    if (progressText) progressText.textContent = label;
+    if (progressPercent) progressPercent.textContent = `${value}%`;
+
+    progressSteps.forEach((step) => {
+      const stepIndex = progressStageOrder.indexOf(step.dataset.stage);
+      step.classList.toggle('is-active', step.dataset.stage === stage);
+      step.classList.toggle('is-complete', activeIndex > stepIndex);
+    });
   };
 
   const resetUploadProgress = () => {
     if (progressEl) progressEl.hidden = true;
     if (progressBar) progressBar.style.width = '0%';
     if (progressText) progressText.textContent = 'Aguardando arquivo...';
+    if (progressPercent) progressPercent.textContent = '0%';
+    progressSteps.forEach((step) => {
+      step.classList.remove('is-active', 'is-complete');
+    });
   };
 
   form.addEventListener('submit', async (event) => {
@@ -1671,9 +1748,9 @@ function bindVideoForm() {
     let uploadedFileId = '';
     try {
       submitButton.disabled = true;
-      setUploadProgress(3, 'Lendo vídeo...');
+      setUploadProgress(3, 'Lendo vídeo...', 'prepare');
       const duration = await detectVideoDuration(file);
-      setUploadProgress(8, 'Validando vídeo...');
+      setUploadProgress(8, 'Validando vídeo...', 'prepare');
       const payload = {
         title: String(formData.get('title')).trim(),
         duration,
@@ -1687,7 +1764,22 @@ function bindVideoForm() {
 
       if (hasAppwriteConfig && file) {
         const upload = await uploadVideo(file, (progress) => {
-          setUploadProgress(progress.progress, 'Enviando vídeo...');
+          const uploadProgress = 65 + ((progress.progress || 0) * 0.3);
+          setUploadProgress(uploadProgress, 'Enviando vídeo...', 'upload');
+        }, (status) => {
+          if (status.stage === 'loading') {
+            const loadProgress = 10 + ((status.progress || 0) * 0.1);
+            setUploadProgress(loadProgress, 'Carregando compressor...', 'compress');
+            return;
+          }
+
+          if (status.stage === 'skipped') {
+            setUploadProgress(64, 'Compressor indisponível. Enviando original...', 'upload');
+            return;
+          }
+
+          const compressionProgress = 20 + ((status.progress || 0) * 0.45);
+          setUploadProgress(compressionProgress, 'Comprimindo vídeo...', 'compress');
         });
         uploadedFileId = upload.fileId;
         uploadedMeta = {
@@ -1697,10 +1789,13 @@ function bindVideoForm() {
           mimeType: upload.mimeType,
           viewUrl: upload.viewUrl,
           downloadUrl: upload.downloadUrl,
+          originalSize: upload.originalSizeBeforeCompression,
+          compressedSize: upload.compressedSize,
+          wasCompressed: upload.wasCompressed,
         };
       }
 
-      setUploadProgress(96, 'Salvando dados...');
+      setUploadProgress(96, 'Salvando dados...', 'save');
       if (hasFirebaseConfig) {
         await addVideoMetadata({ ...payload, ...uploadedMeta });
       }
@@ -1717,7 +1812,7 @@ function bindVideoForm() {
           { name: 'Usuário', value: state.user?.email || 'admin' },
         ],
       });
-      setUploadProgress(100, 'Concluído...');
+      setUploadProgress(100, 'Concluído', 'save');
       await loadData();
       showToast('Vídeo enviado', `${payload.title} foi adicionado à biblioteca.`, 'success');
       form.reset();
@@ -1800,20 +1895,7 @@ function setupRealtimeListeners() {
   }
 
   const unsubDevices = subscribeToDevices((devicesData) => {
-    const now = Date.now();
-    const ONLINE_THRESHOLD = 2 * 60 * 1000;
-
-    const devicesWithStatus = devicesData.map(d => {
-      const lastHeartbeat = d.lastHeartbeat;
-      let computedStatus = 'offline';
-
-      if (lastHeartbeat) {
-        const timestamp = lastHeartbeat.toDate ? lastHeartbeat.toDate().getTime() : (typeof lastHeartbeat === 'number' ? lastHeartbeat : 0);
-        computedStatus = (now - timestamp < ONLINE_THRESHOLD) ? 'online' : 'offline';
-      }
-
-      return { ...d, status: computedStatus };
-    });
+    const devicesWithStatus = normalizeDevicesStatus(devicesData);
 
     state.devices = devicesWithStatus;
 
@@ -1827,13 +1909,14 @@ function setupRealtimeListeners() {
     };
 
     updateDeviceStatusUI(devicesWithStatus);
-    render();
   });
 
   const unsubPlaylists = subscribeToPlaylists((playlistsData) => {
     state.playlists = playlistsData;
     state.alerts = buildOperationalAlerts(state.savedAlerts);
-    render();
+    if (shouldRenderRealtimeUpdate(['dashboard', 'playlists', 'geofencing', 'campaignReports'])) {
+      render();
+    }
   });
 
   const unsubConnectionRequests = subscribeToConnectionRequests((requests) => {
@@ -1853,7 +1936,9 @@ function setupRealtimeListeners() {
       });
     });
     state.connectionRequests = pendingRequests;
-    render();
+    if (shouldRenderRealtimeUpdate(['dashboard', 'connections'])) {
+      render();
+    }
   });
 
   const unsubHours = subscribeToHours((hoursData) => {
@@ -1894,6 +1979,10 @@ function updateDeviceStatusUI(devices) {
         statusEl.textContent = statusText;
         statusEl.className = `status ${safeCssClass(device.status, 'offline')}`;
       }
+
+      row.querySelectorAll('[data-current-video]').forEach((videoEl) => {
+        videoEl.textContent = getDeviceCurrentVideoTitle(device);
+      });
     }
   });
 
