@@ -252,7 +252,10 @@ export function devicesView(data) {
       </div>
       <div class="row wrap" style="align-items:center;gap:8px;">
         <span class="status ${safeCssClass(device.status, 'offline')}">${formatDeviceStatus(device.status)}</span>
+        ${device.lastStabilityIssue?.type ? `<span class="pill warning" title="${escapeAttr(String(device.lastStabilityIssue.trace || '').slice(0, 500))}">${escapeHtml(device.lastStabilityIssue.type)} detectado</span>` : ''}
         ${device.battery || device.battery === 0 ? `<span class="pill">${device.battery}% bateria</span>` : ''}
+        ${device.ownerUid ? `<button class="button compact secondary" data-device-command="SYNC_NOW" data-device-id="${escapeAttr(device.id)}">Sincronizar</button>` : '<span class="pill warning">Identidade pendente</span>'}
+        ${device.ownerUid ? `<button class="button-icon" data-device-command="FLUSH_TELEMETRY" data-device-id="${escapeAttr(device.id)}" title="Enviar telemetria agora">↥</button>` : ''}
         <button class="button-edit" data-edit="tablet" data-id="${escapeAttr(device.id)}" title="Editar">✎</button>
         <button class="button-delete" data-delete="tablet" data-id="${escapeAttr(device.id)}" title="Excluir">✕</button>
       </div>
@@ -337,7 +340,7 @@ export function videosView(data) {
             <div class="form-group">
               <label>Arquivo do Vídeo</label>
               <div class="file-upload">
-                <input class="file-input" name="file" type="file" accept="video/*" id="video-file" required />
+                <input class="file-input" name="file" type="file" accept="video/mp4,.mp4" id="video-file" required />
                 <label for="video-file" class="file-label"><span class="file-icon">▣</span><span class="file-text" id="file-name">Clique para selecionar um vídeo</span></label>
               </div>
             </div>
@@ -416,10 +419,10 @@ export function playlistsView(data) {
               <label>Selecionar Tablets</label>
               <div class="checkbox-list">
                 ${data.devices.length > 0 ? data.devices.map((device) => `
-                  <label class="checkbox-item">
-                    <input type="checkbox" name="devices" value="${escapeAttr(device.id || device.name)}" />
-                    <span class="checkbox-box">✓</span>
-                    <span class="checkbox-label">${escapeHtml(device.name)}</span>
+                    <label class="checkbox-item ${device.ownerUid ? '' : 'is-disabled'}" title="${device.ownerUid ? '' : 'Reconecte este tablet para habilitar a atribuição segura'}">
+                      <input type="checkbox" name="devices" value="${escapeAttr(device.id || device.name)}" ${device.ownerUid ? '' : 'disabled'} />
+                      <span class="checkbox-box">✓</span>
+                      <span class="checkbox-label">${escapeHtml(device.name)}${device.ownerUid ? '' : ' · reconexão necessária'}</span>
                   </label>
                 `).join('') : '<p class="text-muted">Nenhum tablet disponível</p>'}
               </div>
@@ -651,6 +654,7 @@ export function mapView(data) {
             <p class="card-subtitle">Selecione um tablet para ver a posição atual enviada pelo banco de dados.</p>
           </div>
           <div class="filter-controls">
+            <input id="map-date-filter" class="input" type="date" value="${escapeAttr(mapFilters.date || '')}" />
             <select id="map-device-filter" class="select">
               <option value="all" ${mapFilters.deviceId === 'all' ? 'selected' : ''}>Todos os carros</option>
               ${data.devices.length > 0 ? data.devices.map((device) => `
@@ -662,9 +666,9 @@ export function mapView(data) {
           </div>
         </div>
         <div class="map-route-summary">
-          <span><strong>${escapeHtml(selectedLabel)}</strong></span>
-          <span>${escapeHtml(mapFilters.deviceId === 'all' ? `${data.devices.length} carros cadastrados` : (selectedDevice?.car || 'Veiculo nao informado'))}</span>
-          <span>${devicesWithLocation.length} com GPS</span>
+          <span><strong id="map-selected-device">${escapeHtml(selectedLabel)}</strong></span>
+          <span id="map-selected-detail">${escapeHtml(mapFilters.deviceId === 'all' ? `${data.devices.length} carros cadastrados` : (selectedDevice?.car || 'Veiculo nao informado'))}</span>
+          <span id="map-route-count">${mapFilters.deviceId === 'all' ? `${devicesWithLocation.length} com GPS` : ''}</span>
         </div>
       </section>
       <section class="card" style="padding: 0; overflow: hidden;">
@@ -1186,26 +1190,28 @@ export function campaignReportsView(data) {
 export function connectionsView(data) {
   const pendingRequests = data.connectionRequests || [];
   const devices = data.devices || [];
+  const connectionError = data.connectionError || '';
 
   const deviceRows = pendingRequests.map((request) => {
     const existingDevice = devices.find(d => d.id === request.deviceId);
     const modelLabel = request.model || request.deviceName || 'Modelo nao informado';
     return `
-      <div class="connection-card" style="background: #1a1a2e; padding: 16px; margin-bottom: 12px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #333;">
-        <div>
-          <h4 style="margin: 0 0 8px; color: #00ff00;">${escapeHtml(request.deviceId)}</h4>
-          <p style="margin: 0; color: #aaa; font-size: 13px;">
-            ${escapeHtml(modelLabel)} • Solicitado: ${formatDate(request.createdAt)}
-          </p>
+      <div class="connection-card">
+        <div class="connection-device-icon">▣</div>
+        <div class="connection-copy">
+          <span class="eyebrow">Novo dispositivo</span>
+          <h4>${escapeHtml(request.deviceId)}</h4>
+          <p>${escapeHtml(modelLabel)} · solicitado ${formatDate(request.createdAt)}</p>
+          ${request.ownerUid ? '<span class="security-badge">Identidade verificada</span>' : '<span class="security-badge warning">App antigo · atualize antes de conectar</span>'}
         </div>
-        <button class="button primary" data-connect="${escapeAttr(request.deviceId)}" ${existingDevice && existingDevice.name ? 'disabled' : ''}>
+        <button class="button primary" data-connect="${escapeAttr(request.deviceId)}" ${existingDevice && existingDevice.name || !request.ownerUid ? 'disabled' : ''}>
           ${existingDevice && existingDevice.name ? 'Já conectado' : 'Conectar'}
         </button>
       </div>
     `;
   }).join('');
 
-  const connectedDevices = devices.filter(d => d.name && d.createdAt);
+  const connectedDevices = devices.filter(d => d.name);
 
   const connectedRows = connectedDevices.map(device => `
     <div class="list-item" data-device-id="${escapeAttr(device.id)}">
@@ -1213,29 +1219,35 @@ export function connectionsView(data) {
         <p class="list-item-title">${escapeHtml(device.name || '—')}</p>
         <p class="list-item-subtitle">${escapeHtml(device.id)} • ${escapeHtml(device.model || device.deviceName || 'Modelo nao informado')} • ${escapeHtml(device.car || 'Sem veículo')} • ${escapeHtml(device.driver || 'Sem motorista')}</p>
       </div>
-      <span class="pill active">Conectado</span>
+      <div class="row wrap">
+        <span class="security-badge ${device.ownerUid ? '' : 'warning'}">${device.ownerUid ? 'Protegido' : 'Identidade pendente'}</span>
+        <span class="status ${safeCssClass(device.status, 'offline')}">${formatDeviceStatus(device.status)}</span>
+      </div>
     </div>
   `).join('');
 
   return layoutView(
     'Conexões',
-    'Gerencie a conexão dos tablets.',
+    'Aprove novos tablets e acompanhe a identidade de cada dispositivo.',
     `
+      ${connectionError ? `<div class="alert error"><strong>Falha ao consultar conexões.</strong> ${escapeHtml(connectionError)}</div>` : ''}
       <section class="grid-2">
         <article class="card">
           <div class="card-header">
             <div>
-              <h3 class="card-title">Tablets Pendentes</h3>
-              <p class="card-subtitle">Aguardando aprovação</p>
+              <span class="eyebrow">Entrada segura</span>
+              <h3 class="card-title">Aguardando aprovação</h3>
+              <p class="card-subtitle">Confira o código exibido no tablet antes de conectar.</p>
             </div>
           </div>
-          ${pendingRequests.length > 0 ? deviceRows : '<p class="text-muted">Nenhum tablet pendente</p>'}
+          ${pendingRequests.length > 0 ? deviceRows : '<div class="empty-state compact"><span class="empty-icon">✓</span><h3>Tudo em dia</h3><p>Nenhum tablet aguardando aprovação.</p></div>'}
         </article>
         <article class="card">
           <div class="card-header">
             <div>
-              <h3 class="card-title">Tablets Conectados</h3>
-              <p class="card-subtitle">Já aprovados</p>
+              <span class="eyebrow">Frota</span>
+              <h3 class="card-title">Tablets conectados</h3>
+              <p class="card-subtitle">Dispositivos aprovados nesta central.</p>
             </div>
           </div>
           ${connectedDevices.length > 0 ? connectedRows : '<p class="text-muted">Nenhum tablet conectado</p>'}

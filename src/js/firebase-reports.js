@@ -1,70 +1,101 @@
-import {
-  collection,
-  doc,
-  getDocs,
-  orderBy,
-  query,
-  where,
-} from 'firebase/firestore';
+import { collection, getDocs, orderBy, query, where } from 'firebase/firestore';
 import { hasFirebaseConfig, db } from './firebase.js';
 
-const CAMPAIGN_METRICS_COLLECTION = 'campaignMetrics';
-const PLAYBACK_PROOFS_COLLECTION = 'playbackProofs';
+const PLAYBACK_BATCHES_COLLECTION = 'playbackBatches';
 
-async function fetchSubcollection(parentRef, name) {
-  const snap = await getDocs(collection(parentRef, name));
-  return snap.docs.map((item) => ({ id: item.id, ...item.data() }));
+function aggregateProofs(proofs) {
+  const campaigns = new Map();
+
+  proofs.forEach((proof) => {
+    const campaignKey = `${proof.playlistId || 'unknown'}_${proof.date || ''}`;
+    if (!campaigns.has(campaignKey)) {
+      campaigns.set(campaignKey, {
+        id: campaignKey,
+        playlistId: proof.playlistId || '',
+        playlistName: proof.playlistName || '',
+        date: proof.date || '',
+        totalPlaybackSeconds: 0,
+        totalLoops: 0,
+        devices: [],
+        videos: [],
+      });
+    }
+
+    const campaign = campaigns.get(campaignKey);
+    const duration = Number(proof.durationSeconds || 0);
+    campaign.totalPlaybackSeconds += duration;
+    campaign.totalLoops += 1;
+    if (proof.deviceId && !campaign.devices.includes(proof.deviceId)) campaign.devices.push(proof.deviceId);
+
+    let video = campaign.videos.find((item) => item.videoId === proof.videoId);
+    if (!video) {
+      video = {
+        id: proof.videoId || 'unknown',
+        videoId: proof.videoId || '',
+        videoName: proof.videoName || '',
+        totalPlaybackSeconds: 0,
+        loops: 0,
+        devices: [],
+        hours: [],
+        neighborhoods: [],
+        cities: [],
+      };
+      campaign.videos.push(video);
+    }
+
+    video.totalPlaybackSeconds += duration;
+    video.loops += 1;
+    if (proof.deviceId && !video.devices.includes(proof.deviceId)) video.devices.push(proof.deviceId);
+
+    const hour = proof.hour || '';
+    let hourMetric = video.hours.find((item) => item.hour === hour);
+    if (!hourMetric) {
+      hourMetric = { hour, loops: 0, totalPlaybackSeconds: 0 };
+      video.hours.push(hourMetric);
+    }
+    hourMetric.loops += 1;
+    hourMetric.totalPlaybackSeconds += duration;
+
+    const location = proof.endLocation || {};
+    if (location.neighborhood) {
+      let metric = video.neighborhoods.find((item) => item.neighborhood === location.neighborhood);
+      if (!metric) {
+        metric = { neighborhood: location.neighborhood, city: location.city || '', loops: 0, totalPlaybackSeconds: 0 };
+        video.neighborhoods.push(metric);
+      }
+      metric.loops += 1;
+      metric.totalPlaybackSeconds += duration;
+    }
+    if (location.city) {
+      let metric = video.cities.find((item) => item.city === location.city);
+      if (!metric) {
+        metric = { city: location.city, state: location.state || '', loops: 0, totalPlaybackSeconds: 0 };
+        video.cities.push(metric);
+      }
+      metric.loops += 1;
+      metric.totalPlaybackSeconds += duration;
+    }
+  });
+
+  return [...campaigns.values()].sort((a, b) => String(b.date).localeCompare(String(a.date)));
 }
 
 export async function fetchCampaignReports(startDate, endDate) {
-  if (!db || !hasFirebaseConfig) {
-    return { metrics: [], proofs: [] };
-  }
+  if (!db || !hasFirebaseConfig) return { metrics: [], proofs: [] };
 
-  const metricsQuery = query(
-    collection(db, CAMPAIGN_METRICS_COLLECTION),
+  const batchesQuery = query(
+    collection(db, PLAYBACK_BATCHES_COLLECTION),
     where('date', '>=', startDate),
     where('date', '<=', endDate),
     orderBy('date', 'desc')
   );
-
-  const proofsQuery = query(
-    collection(db, PLAYBACK_PROOFS_COLLECTION),
-    where('date', '>=', startDate),
-    where('date', '<=', endDate),
-    orderBy('date', 'desc')
-  );
-
-  const [metricsSnap, proofsSnap] = await Promise.all([
-    getDocs(metricsQuery),
-    getDocs(proofsQuery),
-  ]);
-
-  const metrics = await Promise.all(metricsSnap.docs.map(async (metricDoc) => {
-    const metric = { id: metricDoc.id, ...metricDoc.data() };
-    const metricRef = doc(db, CAMPAIGN_METRICS_COLLECTION, metricDoc.id);
-    const videosSnap = await getDocs(collection(metricRef, 'videos'));
-
-    const videos = await Promise.all(videosSnap.docs.map(async (videoDoc) => {
-      const video = { id: videoDoc.id, ...videoDoc.data() };
-      const videoRef = doc(metricRef, 'videos', videoDoc.id);
-      const [hours, neighborhoods, cities] = await Promise.all([
-        fetchSubcollection(videoRef, 'hours'),
-        fetchSubcollection(videoRef, 'neighborhoods'),
-        fetchSubcollection(videoRef, 'cities'),
-      ]);
-
-      return { ...video, hours, neighborhoods, cities };
-    }));
-
-    return { ...metric, videos };
-  }));
-
-  const proofs = proofsSnap.docs
-    .map((item) => ({ id: item.id, ...item.data() }))
+  const snapshot = await getDocs(batchesQuery);
+  const proofs = snapshot.docs
+    .flatMap((batch) => Array.isArray(batch.data().events) ? batch.data().events : [])
+    .filter((event) => event.date >= startDate && event.date <= endDate)
     .sort((a, b) => Number(b.startedAt || 0) - Number(a.startedAt || 0));
 
-  return { metrics, proofs };
+  return { metrics: aggregateProofs(proofs), proofs };
 }
 
 export async function exportCampaignReportRows(metrics = [], proofs = []) {
@@ -73,8 +104,8 @@ export async function exportCampaignReportRows(metrics = [], proofs = []) {
     return videos.map((video) => ({
       'Data': campaign.date || '',
       'Campanha': campaign.playlistName || campaign.playlistId || '',
-      'Video': video.videoName || video.videoId || '',
-      'Loops': video.loops || 0,
+      'Vídeo': video.videoName || video.videoId || '',
+      'Exibições': video.loops || 0,
       'Tempo exibido (h)': ((video.totalPlaybackSeconds || 0) / 3600).toFixed(2),
       'Tablets': Array.isArray(video.devices) ? video.devices.length : 0,
     }));
@@ -84,15 +115,15 @@ export async function exportCampaignReportRows(metrics = [], proofs = []) {
     'Data': proof.date || '',
     'Hora': proof.hour || '',
     'Campanha': proof.playlistName || proof.playlistId || '',
-    'Video': proof.videoName || proof.videoId || '',
+    'Vídeo': proof.videoName || proof.videoId || '',
     'Tablet': proof.deviceId || '',
     'Motorista': proof.driver || '',
-    'Inicio': proof.startedAt ? new Date(proof.startedAt).toLocaleString('pt-BR') : '',
+    'Início': proof.startedAt ? new Date(proof.startedAt).toLocaleString('pt-BR') : '',
     'Fim': proof.endedAt ? new Date(proof.endedAt).toLocaleString('pt-BR') : '',
-    'Duracao (s)': proof.durationSeconds || 0,
+    'Duração (s)': proof.durationSeconds || 0,
     'Cidade': proof.endLocation?.city || '',
     'Bairro': proof.endLocation?.neighborhood || '',
-    'Motivo fim': proof.endReason || '',
+    'Motivo': proof.endReason || '',
   }));
 
   return { campaignRows, proofRows };

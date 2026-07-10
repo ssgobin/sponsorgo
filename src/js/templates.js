@@ -6,14 +6,9 @@
           <div class="brand">
             <img src="/sponsorgo.png" alt="SponsorGo" class="brand-logo-img" />
           </div>
-          <div class="partner-lockup partner-lockup-auth" aria-label="Parceiro Carmí">
-            <span class="partner-label">Parceiro</span>
-            <span class="partner-logo-frame">
-              <img src="/logo_carmi.png" alt="Carmí" class="partner-logo" />
-            </span>
-          </div>
-          <h1>Entrar</h1>
-          <p>Faça login com sua conta administrativa.</p>
+          <span class="eyebrow">Central de operações</span>
+          <h1>Bem-vindo de volta</h1>
+          <p>Acesse sua frota, conteúdos e resultados em um só lugar.</p>
           <form id="login-form">
             <div class="form-group" style="margin-bottom: 16px;">
               <label>E-mail</label>
@@ -23,19 +18,20 @@
               <label>Senha</label>
               <input class="input" name="password" type="password" placeholder="••••••••" required />
             </div>
-            <button class="button primary" type="submit" style="width: 100%;">Entrar</button>
+            <button class="button primary auth-submit" type="submit">Entrar na central <span>→</span></button>
             <div id="login-notice" class="notice error" style="display:none;margin-top:16px;"></div>
           </form>
         </div>
       </div>
       <div class="auth-hero">
         <div class="auth-hero-content">
-          <h2>Central de Controle</h2>
-          <p>Gerencie tablets, vídeos, playlists e monitore suas campanhas em tempo real.</p>
-          <div class="features">
-            <span>Firebase</span>
-            <span>Firestore</span>
-            <span>Appwrite</span>
+          <span class="hero-kicker">Mídia em movimento</span>
+          <h2>Sua operação visível.<br/>Seu conteúdo no controle.</h2>
+          <p>Conecte tablets, publique campanhas e acompanhe a execução com clareza.</p>
+          <div class="hero-proof">
+            <div><strong>Tempo real</strong><span>Saúde da frota</span></div>
+            <div><strong>Offline first</strong><span>Exibição resiliente</span></div>
+            <div><strong>Mensurável</strong><span>Provas por campanha</span></div>
           </div>
         </div>
       </div>
@@ -47,19 +43,14 @@ export function appTemplate() {
   return `
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand">
+        <div class="brand sidebar-logo-wrap">
           <img src="/sponsorgo.png" alt="SponsorGo" class="brand-logo-sidebar" />
+          <span class="product-chip">CENTRAL</span>
         </div>
         <nav id="nav" class="nav"></nav>
         <div class="sidebar-footer">
-          <p>Ambiente</p>
-          <strong>SponsorGo Central</strong>
-        </div>
-        <div class="partner-lockup partner-lockup-sidebar" aria-label="Parceiro Carmí">
-          <span class="partner-label">Parceiro</span>
-          <span class="partner-logo-frame">
-            <img src="/logo_carmi.png" alt="Carmí" class="partner-logo" />
-          </span>
+          <span class="system-dot"></span>
+          <div><p>Sistema operacional</p><strong>Firebase conectado</strong></div>
         </div>
         <div class="sidebar-brand">
           <span class="brand-label">Desenvolvido por</span>
@@ -77,6 +68,7 @@ export function layoutView(title, subtitle, content, extraActions = '') {
   return `
     <div class="topbar">
       <div class="topbar-info">
+        <span class="eyebrow">SponsorGo Central</span>
         <h2>${title}</h2>
         <p>${subtitle}</p>
       </div>

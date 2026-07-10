@@ -1,6 +1,6 @@
 ﻿import { loginTemplate, appTemplate } from './templates.js';
 import { dashboardView, devicesView, videosView, playlistsView, geofencingView, monitorView, mapView, settingsView, connectionsView, hoursView, campaignReportsView, downloadAppView } from './views.js';
-import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylistWithAssignments, updatePlaylistWithAssignments, softDeletePlaylistWithAssignments, deleteVideoAndPrunePlaylists, fetchCollection, deleteDocument, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, approveConnectionWithDevice, addGeofenceRule } from './firebase.js';
+import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylistWithAssignments, updatePlaylistWithAssignments, softDeletePlaylistWithAssignments, deleteVideoAndPrunePlaylists, deleteDeviceWithRelations, fetchCollection, fetchLocationTrack, deleteDocument, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, approveConnectionWithDevice, addGeofenceRule, sendDeviceCommand } from './firebase.js';
 import { hasAppwriteConfig, uploadVideo, deleteVideoFile, getVideoFileUrls } from './appwrite.js';
 import { exportToExcel } from './export-excel.js';
 import { fetchTodayHours, fetchMonthHours, fetchActiveAlerts, fetchHoursByDateRange, fetchHoursByDevice, dismissAlert, checkAndCreateAlerts, exportHoursToExcel, initHoursFirebase, subscribeToHours, DAILY_GOAL_HOURS } from './firebase-hours.js';
@@ -9,6 +9,8 @@ import { notifyDiscord } from './discord.js';
 
 const app = document.querySelector('#app');
 const isDemo = !(hasFirebaseConfig && hasAppwriteConfig);
+const ONLINE_THRESHOLD_MS = 6 * 60 * 1000;
+const PRESENCE_REFRESH_MS = 30 * 1000;
 
 console.log('=== SponsorGo Central ===');
 console.log('Firebase:', hasFirebaseConfig ? 'OK' : 'NÃO CONFIGURADO');
@@ -24,6 +26,7 @@ const state = {
   playlists: [],
   geofenceRules: [],
   connectionRequests: [],
+  connectionError: '',
   knownConnectionRequestIds: new Set(),
   activity: [],
   hoursData: [],
@@ -267,26 +270,26 @@ function getDeviceLocation(device = {}) {
 }
 
 function normalizeDeviceStatus(device, now = Date.now()) {
-  const rawStatus = String(device?.status || '').trim().toLowerCase();
-  const explicitOnlineStatuses = new Set(['online', 'active', 'ativo', 'rodando', 'running']);
+  const rawStatus = String(device?.reportedStatus ?? device?.status ?? '').trim().toLowerCase();
   const explicitOfflineStatuses = new Set(['offline', 'inactive', 'inativo', 'parado', 'stopped']);
 
-  if (explicitOnlineStatuses.has(rawStatus)) return 'online';
   if (explicitOfflineStatuses.has(rawStatus)) return 'offline';
 
   const lastHeartbeatMs = getTimestampMs(device?.lastHeartbeat || device?.lastSeen || device?.updatedAt);
-  const ONLINE_THRESHOLD = 2 * 60 * 1000;
-
   if (!lastHeartbeatMs) return 'offline';
-  return now - lastHeartbeatMs < ONLINE_THRESHOLD ? 'online' : 'offline';
+  return now - lastHeartbeatMs < ONLINE_THRESHOLD_MS ? 'online' : 'offline';
 }
 
 function normalizeDevicesStatus(devicesData) {
   const now = Date.now();
-  return devicesData.map((device) => ({
-    ...device,
-    status: normalizeDeviceStatus(device, now),
-  }));
+  return devicesData.map((device) => {
+    const reportedStatus = device.reportedStatus ?? device.status ?? '';
+    return {
+      ...device,
+      reportedStatus,
+      status: normalizeDeviceStatus({ ...device, reportedStatus }, now),
+    };
+  });
 }
 
 function getDeviceCurrentVideoTitle(device, videos = state.videos) {
@@ -409,25 +412,64 @@ function formatVideoDuration(seconds) {
 }
 
 function detectVideoDuration(file) {
+  return inspectVideoFile(file).then(({ duration }) => formatVideoDuration(duration));
+}
+
+function inspectVideoFile(file) {
   return new Promise((resolve, reject) => {
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    if (extension !== 'mp4' || (file.type && file.type !== 'video/mp4')) {
+      reject(new Error('Formato incompatível. Envie um arquivo MP4 com vídeo H.264 e áudio AAC.'));
+      return;
+    }
+
     const video = document.createElement('video');
     const objectUrl = URL.createObjectURL(file);
+    const timeoutId = window.setTimeout(() => {
+      cleanup();
+      reject(new Error('O vídeo demorou demais para ser validado. Converta-o para MP4 H.264/AAC.'));
+    }, 15_000);
 
     const cleanup = () => {
+      window.clearTimeout(timeoutId);
       URL.revokeObjectURL(objectUrl);
       video.removeAttribute('src');
       video.load();
     };
 
-    video.preload = 'metadata';
+    video.preload = 'auto';
+    video.muted = true;
     video.onloadedmetadata = () => {
       const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      const width = video.videoWidth || 0;
+      const height = video.videoHeight || 0;
+      const longEdge = Math.max(width, height);
+      const shortEdge = Math.min(width, height);
+      if (!duration || !width || !height) {
+        cleanup();
+        reject(new Error('O arquivo não contém uma faixa de vídeo válida.'));
+        return;
+      }
+      if (longEdge > 1920 || shortEdge > 1080) {
+        cleanup();
+        reject(new Error(`Resolução ${width}x${height} não suportada. O limite é Full HD (1920x1080).`));
+        return;
+      }
+      video.currentTime = Math.min(0.1, duration / 2);
+    };
+    video.onloadeddata = () => {
+      const result = {
+        duration: Number.isFinite(video.duration) ? video.duration : 0,
+        width: video.videoWidth || 0,
+        height: video.videoHeight || 0,
+        mimeType: file.type || 'video/mp4',
+      };
       cleanup();
-      resolve(formatVideoDuration(duration));
+      resolve(result);
     };
     video.onerror = () => {
       cleanup();
-      reject(new Error('Não foi possível detectar a duração do vídeo.'));
+      reject(new Error('O navegador não conseguiu decodificar o vídeo. Converta-o para MP4 H.264/AAC.'));
     };
     video.src = objectUrl;
   });
@@ -472,8 +514,16 @@ function buildPlaylistVideos(selectedVideoIds) {
       fileId: video.fileId || '',
       name: video.title,
       order: index,
-      active: true
+      active: true,
+      checksumSha256: video.checksumSha256 || '',
+      sizeBytes: Number(video.sizeBytes || 0) || null,
     }));
+}
+
+async function calculateSha256(file) {
+  const bytes = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('');
 }
 
 function findDevicePlaylistConflicts(selectedDeviceIds, currentPlaylistId = null) {
@@ -722,11 +772,8 @@ function renderView() {
   bindMapView();
   
   if (state.route === 'map') {
-    const selectedDevices = state.mapFilters.deviceId === 'all'
-      ? state.devices
-      : state.devices.filter((device) => device.id === state.mapFilters.deviceId);
-    window.mapDevicesData = buildMapDevicesData(selectedDevices);
-    window.mapRoutePointsData = [];
+    window.mapDevicesData = buildMapDevicesData(state.devices);
+    window.mapRoutePointsData = state.mapRoutePoints || [];
     console.log('renderView - route is map, scheduling initMap');
     setTimeout(initMap, 500);
   }
@@ -845,27 +892,51 @@ function updateMapMarkers() {
   }
   
   const devices = window.mapDevicesData || [];
-  
-  if (devices.length === 0) {
-    console.log('No device data');
-    window.map.setView(DEFAULT_CENTER, 13);
-    return;
-  }
-  
   const bounds = [];
+  const selectedDeviceId = state.mapFilters.deviceId !== 'all' ? state.mapFilters.deviceId : null;
+  const routePoints = (window.mapRoutePointsData || [])
+    .map((point) => [normalizeCoordinate(point.latitude), normalizeCoordinate(point.longitude)])
+    .filter(([lat, lng]) => lat != null && lng != null);
+
+  if (routePoints.length > 0) {
+    window.L.polyline(routePoints, {
+      color: '#2f80ed',
+      weight: 5,
+      opacity: 0.85,
+      lineJoin: 'round',
+    }).addTo(window.mapRouteLayer);
+    window.L.circleMarker(routePoints[0], {
+      radius: 7,
+      color: '#ffffff',
+      weight: 2,
+      fillColor: '#27ae60',
+      fillOpacity: 1,
+    }).bindTooltip('Início da rota').addTo(window.mapRouteLayer);
+    if (routePoints.length > 1) {
+      window.L.circleMarker(routePoints[routePoints.length - 1], {
+        radius: 7,
+        color: '#ffffff',
+        weight: 2,
+        fillColor: '#eb5757',
+        fillOpacity: 1,
+      }).bindTooltip('Último ponto').addTo(window.mapRouteLayer);
+    }
+    routePoints.forEach((point) => bounds.push(point));
+  }
   
   devices.forEach((device) => {
     if (device.lat != null && device.lng != null) {
       const isOnline = device.status === 'online';
+      const isSelected = selectedDeviceId === device.id;
       const icon = window.L.divIcon({
         className: 'custom-marker',
         html: `<div style="
           background: ${isOnline ? '#4CAF50' : '#9E9E9E'};
-          width: 32px;
-          height: 32px;
+          width: ${isSelected ? '40px' : '32px'};
+          height: ${isSelected ? '40px' : '32px'};
           border-radius: 50%;
-          border: 3px solid white;
-          box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+          border: ${isSelected ? '4px solid #f2c94c' : '3px solid white'};
+          box-shadow: ${isSelected ? '0 0 0 5px rgba(242,201,76,.25), 0 3px 10px rgba(0,0,0,.4)' : '0 2px 6px rgba(0,0,0,0.3)'};
           display: flex;
           align-items: center;
           justify-content: center;
@@ -873,8 +944,8 @@ function updateMapMarkers() {
           color: white;
           font-weight: 700;
         ">C</div>`,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16]
+        iconSize: [isSelected ? 40 : 32, isSelected ? 40 : 32],
+        iconAnchor: [isSelected ? 20 : 16, isSelected ? 20 : 16]
       });
       
       const marker = window.L.marker([device.lat, device.lng], { icon })
@@ -887,8 +958,10 @@ function updateMapMarkers() {
             <span style="color: ${isOnline ? 'green' : 'gray'}">● ${isOnline ? 'Online' : 'Offline'}</span>
           </div>
         `);
+
+      marker.on('click', () => window.selectMapDevice?.(device.id));
       
-      bounds.push([device.lat, device.lng]);
+      if (!selectedDeviceId || isSelected) bounds.push([device.lat, device.lng]);
     }
   });
   
@@ -907,24 +980,49 @@ async function bindMapView() {
   if (state.route !== 'map') return;
 
   const deviceFilter = document.getElementById('map-device-filter');
+  const dateFilter = document.getElementById('map-date-filter');
 
-  if (!deviceFilter) return;
+  if (!deviceFilter || !dateFilter) return;
 
-  const updateMapFilter = () => {
+  const updateMapFilter = async () => {
     const deviceId = deviceFilter.value;
-    state.mapFilters = { ...state.mapFilters, deviceId, showRoutes: false };
-    const selectedDevices = deviceId === 'all'
-      ? state.devices
-      : state.devices.filter((device) => device.id === deviceId);
-
-    window.mapDevicesData = buildMapDevicesData(selectedDevices);
+    const date = dateFilter.value || getLocalDateString();
+    state.mapFilters = { ...state.mapFilters, deviceId, date, showRoutes: deviceId !== 'all' };
+    window.mapDevicesData = buildMapDevicesData(state.devices);
+    state.mapRoutePoints = [];
     window.mapRoutePointsData = [];
-    window.mapShowRoutes = false;
+    updateMapMarkers();
+
+    try {
+      const routePoints = deviceId === 'all' ? [] : await fetchLocationTrack(deviceId, date);
+      if (state.mapFilters.deviceId !== deviceId || state.mapFilters.date !== date) return;
+      state.mapRoutePoints = routePoints;
+    } catch (error) {
+      if (state.mapFilters.deviceId !== deviceId || state.mapFilters.date !== date) return;
+      console.error('Erro ao carregar rota diária:', error);
+      state.mapRoutePoints = [];
+      showToast('Rota indisponível', error.message || 'Não foi possível carregar o caminho deste tablet.', 'error');
+    }
+    window.mapRoutePointsData = state.mapRoutePoints;
+    window.mapShowRoutes = deviceId !== 'all';
+
+    const selectedDevice = state.devices.find((device) => device.id === deviceId);
+    const label = document.getElementById('map-selected-device');
+    const detail = document.getElementById('map-selected-detail');
+    const count = document.getElementById('map-route-count');
+    if (label) label.textContent = deviceId === 'all' ? 'Todos os carros' : (selectedDevice?.name || deviceId);
+    if (detail) detail.textContent = deviceId === 'all' ? `${state.devices.length} carros cadastrados` : (selectedDevice?.car || 'Veículo não informado');
+    if (count) count.textContent = deviceId === 'all' ? '' : `${state.mapRoutePoints.length} pontos em ${date.split('-').reverse().join('/')}`;
     updateMapMarkers();
   };
 
-  deviceFilter.addEventListener('change', updateMapFilter);
-  updateMapFilter();
+  deviceFilter.addEventListener('change', () => updateMapFilter());
+  dateFilter.addEventListener('change', () => updateMapFilter());
+  window.selectMapDevice = async (deviceId) => {
+    deviceFilter.value = state.mapFilters.deviceId === deviceId ? 'all' : deviceId;
+    await updateMapFilter();
+  };
+  await updateMapFilter();
 }
 
 function bindLogin() {
@@ -1003,7 +1101,29 @@ function bindForms() {
   bindFileInput();
   bindExportButton();
   bindConnectButtons();
+  bindDeviceCommands();
   bindListFilters();
+}
+
+function bindDeviceCommands() {
+  document.querySelectorAll('[data-device-command]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const device = state.devices.find((item) => item.id === button.dataset.deviceId);
+      if (!device) return;
+      const originalText = button.textContent;
+      try {
+        button.disabled = true;
+        button.textContent = 'Enviando...';
+        await sendDeviceCommand(device, button.dataset.deviceCommand);
+        showToast('Comando enviado', `${device.name || device.id} receberá o comando assim que estiver online.`, 'success');
+      } catch (error) {
+        showToast('Não foi possível enviar', error.message, 'error');
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    });
+  });
 }
 
 function bindListFilters() {
@@ -1264,12 +1384,22 @@ async function performDelete(type, id, fileId) {
     }
 
     if (hasFirebaseConfig) {
+      if (type === 'tablet') {
+        const affectedPlaylists = state.playlists
+          .filter((playlist) => getPlaylistDeviceIds(playlist).includes(id))
+          .map((playlist) => ({
+            id: playlist.id,
+            devices: getPlaylistDeviceIds(playlist).filter((deviceId) => deviceId !== id),
+          }));
+        await deleteDeviceWithRelations(id, deletedDevice?.ownerUid || '', affectedPlaylists);
+      } else {
       const collectionMap = {
         'tablet': 'devices',
         'vídeo': 'videos',
         'playlist': 'playlists',
       };
       await deleteDocument(collectionMap[type], id);
+      }
 
     }
 
@@ -1381,10 +1511,10 @@ function showEditPlaylistModal(playlistId) {
   const deviceCheckboxItems = state.devices.map(device => {
     const isChecked = currentDeviceIds.includes(device.id) ? 'checked' : '';
     return `
-      <label class="checkbox-item">
-        <input type="checkbox" name="devices" value="${escapeHtml(device.id)}" ${isChecked} />
-        <span class="checkbox-box">✓</span>
-        <span class="checkbox-label">${escapeHtml(device.name)}</span>
+        <label class="checkbox-item ${device.ownerUid ? '' : 'is-disabled'}">
+          <input type="checkbox" name="devices" value="${escapeHtml(device.id)}" ${isChecked} ${device.ownerUid ? '' : 'disabled'} />
+          <span class="checkbox-box">✓</span>
+          <span class="checkbox-label">${escapeHtml(device.name)}${device.ownerUid ? '' : ' · reconexão necessária'}</span>
       </label>
     `;
   }).join('');
@@ -1666,12 +1796,20 @@ function bindVideoForm() {
     try {
       submitButton.disabled = true;
       setUploadProgress(3, 'Lendo vídeo...', 'prepare');
-      const duration = await detectVideoDuration(file);
+      const inspection = await inspectVideoFile(file);
+      const duration = formatVideoDuration(inspection.duration);
       setUploadProgress(8, 'Validando vídeo...', 'prepare');
       const payload = {
         title: String(formData.get('title')).trim(),
         duration,
         status: 'Ativo',
+        checksumSha256: await calculateSha256(file),
+        sizeBytes: file.size,
+        width: inspection.width,
+        height: inspection.height,
+        container: 'mp4',
+        playbackProfile: 'H.264/AAC Full HD',
+        compatibilityCheckedAt: Date.now(),
       };
 
       let uploadedMeta = {
@@ -1690,6 +1828,7 @@ function bindVideoForm() {
           size: `${Math.round(upload.sizeOriginal / (1024 * 1024))} MB`,
           fileId: upload.fileId,
           mimeType: upload.mimeType,
+          sizeBytes: upload.sizeOriginal,
           viewUrl: upload.viewUrl,
           downloadUrl: upload.downloadUrl,
         };
@@ -1820,6 +1959,7 @@ function setupRealtimeListeners() {
   });
 
   const unsubConnectionRequests = subscribeToConnectionRequests((requests) => {
+    state.connectionError = '';
     const pendingRequests = requests.filter(r => r.status === 'pending');
     pendingRequests.forEach((request) => {
       if (state.knownConnectionRequestIds.has(request.id)) return;
@@ -1839,6 +1979,12 @@ function setupRealtimeListeners() {
     if (shouldRenderRealtimeUpdate(['dashboard', 'connections'])) {
       render();
     }
+  }, (error) => {
+    console.error('Erro ao acompanhar conexões:', error);
+    state.connectionError = error?.message || 'Não foi possível consultar as conexões no Firebase.';
+    if (shouldRenderRealtimeUpdate(['dashboard', 'connections'])) {
+      render();
+    }
   });
 
   const unsubHours = subscribeToHours((hoursData) => {
@@ -1850,11 +1996,29 @@ function setupRealtimeListeners() {
     }
   });
 
+  const presenceTimer = window.setInterval(() => {
+    const normalized = normalizeDevicesStatus(state.devices);
+    const changed = normalized.some((device, index) => device.status !== state.devices[index]?.status);
+    if (!changed) return;
+
+    state.devices = normalized;
+    state.metrics = {
+      ...state.metrics,
+      onlineDevices: normalized.filter((device) => device.status === 'online').length,
+      offlineDevices: normalized.filter((device) => device.status === 'offline').length,
+    };
+    state.alerts = buildOperationalAlerts(state.savedAlerts);
+    if (shouldRenderRealtimeUpdate(['dashboard', 'devices', 'monitor', 'map', 'connections'])) {
+      render();
+    }
+  }, PRESENCE_REFRESH_MS);
+
   state.unsubscribe = () => {
     unsubDevices();
     unsubPlaylists();
     unsubConnectionRequests();
     unsubHours();
+    window.clearInterval(presenceTimer);
   };
 }
 
@@ -2082,6 +2246,17 @@ if (hasFirebaseConfig && auth) {
     if (user) {
       await loadData();
       setupRealtimeListeners();
+    } else {
+      state.unsubscribe?.();
+      state.unsubscribe = null;
+      state.devices = [];
+      state.videos = [];
+      state.playlists = [];
+      state.geofenceRules = [];
+      state.connectionRequests = [];
+      state.hoursData = [];
+      state.allHoursData = [];
+      state.loading = false;
     }
     render();
   });

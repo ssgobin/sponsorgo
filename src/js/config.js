@@ -1,10 +1,11 @@
 export const firebaseConfig = {
-  apiKey: 'AIzaSyA07rIp3dJ6SeNrQBqqrWlC-7xNyKz0a88',
-  authDomain: 'sponsorgo-ebac9.firebaseapp.com',
-  projectId: 'sponsorgo-ebac9',
-  storageBucket: 'sponsorgo-ebac9.firebasestorage.app',
-  messagingSenderId: '932866660827',
-  appId: '932866660827:web:40f71f4cb4ea8051ba6ffe',
+  apiKey: 'AIzaSyCgAlWrIxh2YUeqh9GP3mqCwjM8F7ySU-Q',
+  authDomain: 'sponsorgodev.firebaseapp.com',
+  projectId: 'sponsorgodev',
+  storageBucket: 'sponsorgodev.firebasestorage.app',
+  messagingSenderId: '374394315304',
+  appId: '1:374394315304:web:3935e46fac516156544b1d',
+  measurementId: 'G-Z51T0N93X5',
 };
 
 export const appwriteConfig = {
