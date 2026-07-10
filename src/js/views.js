@@ -1329,5 +1329,97 @@ export function downloadAppView(data) {
   );
 }
 
+export function appUpdatesView(data) {
+  const update = data.appUpdate || {};
+  const publishedAt = update.updatedAt || update.publishedAt;
+
+  return layoutView(
+    'Atualizações do Player',
+    'Publique novas versões do APK para os tablets detectarem automaticamente.',
+    `
+      <section class="grid-2">
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Publicar APK</h3>
+              <p class="card-subtitle">O arquivo será enviado ao Appwrite e anunciado no Firebase.</p>
+            </div>
+          </div>
+          <form id="app-update-form" class="list">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Package do app</label>
+                <input class="input" name="packageName" value="${escapeAttr(update.packageName || 'com.company.sponsorgodev')}" required />
+              </div>
+              <div class="form-group">
+                <label>Version code</label>
+                <input class="input" name="versionCode" type="number" min="1" step="1" value="${escapeAttr(update.versionCode ? Number(update.versionCode) + 1 : 3)}" required />
+              </div>
+              <div class="form-group">
+                <label>Version name</label>
+                <input class="input" name="versionName" value="${escapeAttr(update.versionName || '2.0.1-dev')}" required />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Mensagem no tablet</label>
+              <input class="input" name="message" value="${escapeAttr(update.message || 'Instale a nova versão do SponsorGo Player.')}" required />
+            </div>
+            <div class="form-row">
+              <label class="checkbox-card">
+                <input type="checkbox" name="required" ${update.required !== false ? 'checked' : ''} />
+                <span>Obrigatória</span>
+              </label>
+              <label class="checkbox-card">
+                <input type="checkbox" name="active" ${update.active !== false ? 'checked' : ''} />
+                <span>Ativa</span>
+              </label>
+            </div>
+            <div class="form-group">
+              <label>APK</label>
+              <div class="file-upload">
+                <input class="file-input" name="apk" type="file" accept=".apk,application/vnd.android.package-archive" id="app-update-apk" required />
+                <label for="app-update-apk" class="file-label"><span class="file-icon">▣</span><span class="file-text" id="app-update-file-name">Clique para selecionar o APK</span></label>
+              </div>
+            </div>
+            <div class="upload-progress" id="app-update-progress" hidden>
+              <div class="upload-progress-header">
+                <span id="app-update-progress-text">Aguardando APK...</span>
+                <strong id="app-update-progress-percent">0%</strong>
+              </div>
+              <div class="upload-progress-track"><span id="app-update-progress-bar"></span></div>
+            </div>
+            <button class="button primary" type="submit">Publicar atualização</button>
+          </form>
+        </article>
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Última atualização publicada</h3>
+              <p class="card-subtitle">Documento appUpdates/latest</p>
+            </div>
+          </div>
+          ${update.versionCode ? `
+            <div class="list">
+              <div class="list-item"><div><p class="list-item-title">Versão ${escapeHtml(update.versionName || update.versionCode)}</p><p class="list-item-subtitle">Version code ${escapeHtml(update.versionCode)} • ${escapeHtml(update.packageName || 'package não informado')}</p></div><span class="pill ${update.active === false ? '' : 'active'}">${update.active === false ? 'Inativa' : 'Ativa'}</span></div>
+              <div class="list-item"><div><p class="list-item-title">${escapeHtml(update.fileName || 'APK')}</p><p class="list-item-subtitle">${escapeHtml(update.fileId || 'Sem fileId')} • ${update.sizeBytes ? `${Math.round(Number(update.sizeBytes) / (1024 * 1024))} MB` : 'Tamanho não informado'}</p></div></div>
+              <div class="list-item"><div><p class="list-item-title">${update.required === false ? 'Opcional' : 'Obrigatória'}</p><p class="list-item-subtitle">${escapeHtml(update.message || 'Sem mensagem')}</p></div></div>
+              <div class="list-item"><div><p class="list-item-title">Publicada</p><p class="list-item-subtitle">${formatDate(publishedAt)}</p></div></div>
+            </div>
+          ` : `
+            <div class="empty-state">
+              <h3>Nenhuma atualização publicada</h3>
+              <p>Envie um APK para criar o documento appUpdates/latest.</p>
+            </div>
+          `}
+          <div class="notice info" style="margin-top: 16px;">
+            <strong>Atenção:</strong> o versionCode informado aqui precisa ser exatamente o versionCode compilado dentro do APK. Se publicar 3, o build.gradle do Android também precisa estar com versionCode 3.
+          </div>
+        </article>
+      </section>
+    `,
+    '<button class="button ghost" data-action="logout">Sair</button>'
+  );
+}
+
 
 

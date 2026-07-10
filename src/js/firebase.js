@@ -61,6 +61,23 @@ export async function addVideoMetadata(payload) {
   return ref.id;
 }
 
+export async function publishAppUpdate(payload) {
+  if (!db) throw new Error('Firebase não configurado.');
+  const ref = doc(db, 'appUpdates', 'latest');
+  await setDoc(ref, {
+    ...payload,
+    updatedAt: serverTimestamp(),
+    publishedAt: serverTimestamp(),
+  }, { merge: true });
+  return ref.id;
+}
+
+export async function fetchLatestAppUpdate() {
+  if (!db) return null;
+  const snap = await getDoc(doc(db, 'appUpdates', 'latest'));
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+}
+
 export async function addPlaylist(payload) {
   if (!db) throw new Error('Firebase não configurado.');
   const ref = doc(collection(db, 'playlists'));

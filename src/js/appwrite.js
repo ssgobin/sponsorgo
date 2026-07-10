@@ -49,6 +49,21 @@ export async function uploadVideo(file, onProgress) {
   };
 }
 
+export async function uploadAppApk(file, onProgress) {
+  assertStorageReady();
+
+  const uploaded = await storage.createFile(bucketId, ID.unique(), file, undefined, onProgress);
+  const urls = getVideoFileUrls(uploaded.$id);
+
+  return {
+    fileId: uploaded.$id,
+    fileName: uploaded.name,
+    sizeOriginal: uploaded.sizeOriginal,
+    mimeType: uploaded.mimeType,
+    ...urls,
+  };
+}
+
 export async function deleteVideoFile(fileId) {
   if (!storage || !bucketId || !fileId) return;
   await storage.deleteFile(bucketId, fileId);

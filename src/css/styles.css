@@ -1267,6 +1267,25 @@ tr:hover td {
   background: var(--success);
 }
 
+.checkbox-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 14px;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.checkbox-card input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+
 .checkbox-list {
   display: flex;
   flex-direction: column;

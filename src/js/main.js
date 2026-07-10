@@ -1,7 +1,7 @@
 ﻿import { loginTemplate, appTemplate } from './templates.js';
-import { dashboardView, devicesView, videosView, playlistsView, geofencingView, monitorView, mapView, settingsView, connectionsView, hoursView, campaignReportsView, downloadAppView } from './views.js';
-import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylistWithAssignments, updatePlaylistWithAssignments, softDeletePlaylistWithAssignments, deleteVideoAndPrunePlaylists, deleteDeviceWithRelations, fetchCollection, fetchLocationTrack, deleteDocument, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, approveConnectionWithDevice, addGeofenceRule, sendDeviceCommand } from './firebase.js';
-import { hasAppwriteConfig, uploadVideo, deleteVideoFile, getVideoFileUrls } from './appwrite.js';
+import { dashboardView, devicesView, videosView, playlistsView, geofencingView, monitorView, mapView, settingsView, connectionsView, hoursView, campaignReportsView, downloadAppView, appUpdatesView } from './views.js';
+import { hasFirebaseConfig, auth, signInWithEmailAndPassword, signOut, onAuthStateChanged, addDevice, addVideoMetadata, addPlaylistWithAssignments, updatePlaylistWithAssignments, softDeletePlaylistWithAssignments, deleteVideoAndPrunePlaylists, deleteDeviceWithRelations, fetchCollection, fetchLocationTrack, deleteDocument, subscribeToDevices, subscribeToPlaylists, subscribeToConnectionRequests, updateDevice, approveConnectionWithDevice, addGeofenceRule, sendDeviceCommand, publishAppUpdate, fetchLatestAppUpdate } from './firebase.js';
+import { hasAppwriteConfig, uploadVideo, uploadAppApk, deleteVideoFile, getVideoFileUrls } from './appwrite.js';
 import { exportToExcel } from './export-excel.js';
 import { fetchTodayHours, fetchMonthHours, fetchActiveAlerts, fetchHoursByDateRange, fetchHoursByDevice, dismissAlert, checkAndCreateAlerts, exportHoursToExcel, initHoursFirebase, subscribeToHours, DAILY_GOAL_HOURS } from './firebase-hours.js';
 import { exportCampaignReportRows, fetchCampaignReports } from './firebase-reports.js';
@@ -28,6 +28,7 @@ const state = {
   geofenceRules: [],
   connectionRequests: [],
   connectionError: '',
+  appUpdate: null,
   knownConnectionRequestIds: new Set(),
   activity: [],
   hoursData: [],
@@ -547,6 +548,7 @@ const navItems = [
   { key: 'connections', label: 'Conexões', icon: '🔗' },
   { key: 'devices', label: 'Tablets', icon: '▣' },
   { key: 'downloadApp', label: 'Baixar App', icon: '⬇' },
+  { key: 'appUpdates', label: 'Atualizações', icon: '⇧' },
   { type: 'section', key: 'content', label: 'Conteúdo' },
   { key: 'playlists', label: 'Playlists', icon: '≣' },
   { key: 'videos', label: 'Vídeos', icon: '▶' },
@@ -618,14 +620,15 @@ async function loadData() {
   }
 
   try {
-    const [devicesData, videosData, playlistsData, geofenceRulesData, connectionRequestsData, hoursData, alertsData] = await Promise.all([
+    const [devicesData, videosData, playlistsData, geofenceRulesData, connectionRequestsData, hoursData, alertsData, appUpdateData] = await Promise.all([
       fetchCollection('devices'),
       fetchCollection('videos'),
       fetchCollection('playlists'),
       fetchCollection('geofenceRules'),
       fetchCollection('connectionRequests'),
       fetchTodayHours(),
-      fetchActiveAlerts()
+      fetchActiveAlerts(),
+      fetchLatestAppUpdate()
     ]);
 
     const devicesWithStatus = normalizeDevicesStatus(devicesData);
@@ -644,6 +647,7 @@ async function loadData() {
     state.allHoursData = hoursData;
     state.savedAlerts = alertsData;
     state.alerts = buildOperationalAlerts(alertsData);
+    state.appUpdate = appUpdateData;
 
     const onlineCount = devicesWithStatus.filter(d => d.status === 'online').length;
     const offlineCount = devicesWithStatus.filter(d => d.status === 'offline').length;
@@ -764,6 +768,7 @@ function renderView() {
     map: mapView(payload),
     settings: settingsView(payload, isDemo),
     downloadApp: downloadAppView(payload),
+    appUpdates: appUpdatesView(payload),
   };
 
   view.innerHTML = views[state.route] || views.dashboard;
@@ -1104,6 +1109,7 @@ function bindForms() {
   bindConnectButtons();
   bindDeviceCommands();
   bindListFilters();
+  bindAppUpdateForm();
 }
 
 function bindDeviceCommands() {
@@ -1154,9 +1160,7 @@ function bindListFilters() {
 
 function bindFileInput() {
   const fileInput = document.getElementById('video-file');
-  if (!fileInput) return;
-  
-  fileInput.addEventListener('change', async (e) => {
+  if (fileInput) fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     const container = fileInput.closest('.file-upload');
     const textEl = container.querySelector('.file-text');
@@ -1175,6 +1179,21 @@ function bindFileInput() {
     } else {
       container.classList.remove('has-file');
       textEl.textContent = 'Clique para selecionar um vídeo';
+    }
+  });
+
+  const apkInput = document.getElementById('app-update-apk');
+  if (apkInput) apkInput.addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    const container = apkInput.closest('.file-upload');
+    const textEl = container.querySelector('.file-text');
+
+    if (file) {
+      container.classList.add('has-file');
+      textEl.textContent = `${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MB)`;
+    } else {
+      container.classList.remove('has-file');
+      textEl.textContent = 'Clique para selecionar o APK';
     }
   });
 }
@@ -1897,6 +1916,122 @@ function bindVideoForm() {
         }
       }
       showToast('Erro', error.message || 'Não foi possível enviar o vídeo.', 'error');
+    } finally {
+      submitButton.disabled = false;
+    }
+  });
+}
+
+function bindAppUpdateForm() {
+  const form = document.querySelector('#app-update-form');
+  if (!form) return;
+
+  const submitButton = form.querySelector('button[type="submit"]');
+  const progressEl = document.getElementById('app-update-progress');
+  const progressBar = document.getElementById('app-update-progress-bar');
+  const progressText = document.getElementById('app-update-progress-text');
+  const progressPercent = document.getElementById('app-update-progress-percent');
+
+  const setProgress = (progress, label) => {
+    const value = Math.max(0, Math.min(100, Math.round(progress || 0)));
+    if (progressEl) progressEl.hidden = false;
+    if (progressBar) progressBar.style.width = `${value}%`;
+    if (progressText) progressText.textContent = label;
+    if (progressPercent) progressPercent.textContent = `${value}%`;
+  };
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    if (!hasAppwriteConfig) {
+      showToast('Appwrite não configurado', 'Configure o Appwrite antes de publicar atualizações.', 'error');
+      return;
+    }
+
+    if (!hasFirebaseConfig) {
+      showToast('Firebase não configurado', 'Configure o Firebase antes de publicar atualizações.', 'error');
+      return;
+    }
+
+    const formData = new FormData(form);
+    const file = formData.get('apk');
+    if (!(file instanceof File) || !file.name || file.size <= 0) {
+      showToast('APK obrigatório', 'Selecione um APK antes de publicar.', 'warning');
+      return;
+    }
+
+    if (!file.name.toLowerCase().endsWith('.apk')) {
+      showToast('Arquivo inválido', 'Envie um arquivo .apk.', 'warning');
+      return;
+    }
+
+    const versionCode = Number(formData.get('versionCode'));
+    if (!Number.isInteger(versionCode) || versionCode <= 0) {
+      showToast('Version code inválido', 'Informe um versionCode inteiro e maior que zero.', 'warning');
+      return;
+    }
+
+    let uploadedFileId = '';
+    try {
+      submitButton.disabled = true;
+      setProgress(5, 'Calculando checksum...');
+      const checksumSha256 = await calculateSha256(file);
+
+      setProgress(15, 'Enviando APK...');
+      const upload = await uploadAppApk(file, (progress) => {
+        setProgress(15 + ((progress.progress || 0) * 0.75), 'Enviando APK...');
+      });
+      uploadedFileId = upload.fileId;
+
+      const payload = {
+        active: formData.get('active') === 'on',
+        required: formData.get('required') === 'on',
+        packageName: String(formData.get('packageName') || '').trim(),
+        versionCode,
+        versionName: String(formData.get('versionName') || '').trim(),
+        title: 'Atualização disponível',
+        message: String(formData.get('message') || '').trim(),
+        fileId: upload.fileId,
+        apkUrl: upload.downloadUrl || '',
+        fileName: upload.fileName || file.name,
+        mimeType: upload.mimeType || 'application/vnd.android.package-archive',
+        sizeBytes: upload.sizeOriginal || file.size,
+        checksumSha256,
+        publishedBy: state.user?.email || 'admin',
+      };
+
+      if (!payload.packageName) throw new Error('Informe o package do app.');
+      if (!payload.versionName) throw new Error('Informe o version name.');
+      if (!payload.message) throw new Error('Informe a mensagem.');
+
+      setProgress(94, 'Publicando no Firebase...');
+      await publishAppUpdate(payload);
+
+      notifyDiscord({
+        title: 'Atualização do app publicada',
+        description: 'Uma nova versão do SponsorGo Player foi disponibilizada.',
+        color: 0x27ae60,
+        fields: [
+          { name: 'Package', value: payload.packageName },
+          { name: 'Versão', value: `${payload.versionName} (${payload.versionCode})` },
+          { name: 'Obrigatória', value: payload.required ? 'Sim' : 'Não' },
+          { name: 'Usuário', value: state.user?.email || 'admin' },
+        ],
+      });
+
+      setProgress(100, 'Atualização publicada');
+      await loadData();
+      showToast('Atualização publicada', `Versão ${payload.versionName} disponível para os tablets.`, 'success');
+      render();
+    } catch (error) {
+      if (uploadedFileId) {
+        try {
+          await deleteVideoFile(uploadedFileId);
+        } catch (cleanupError) {
+          console.warn('Não foi possível remover o APK enviado após falha:', cleanupError);
+        }
+      }
+      showToast('Erro', error.message || 'Não foi possível publicar a atualização.', 'error');
     } finally {
       submitButton.disabled = false;
     }
