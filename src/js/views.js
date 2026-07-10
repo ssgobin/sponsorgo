@@ -352,7 +352,6 @@ export function videosView(data) {
               <div class="upload-progress-track"><span id="upload-progress-bar"></span></div>
               <div class="upload-progress-steps" id="upload-progress-steps" aria-label="Etapas do envio">
                 <span data-stage="prepare">Preparar</span>
-                <span data-stage="compress">Comprimir</span>
                 <span data-stage="upload">Enviar</span>
                 <span data-stage="save">Salvar</span>
               </div>

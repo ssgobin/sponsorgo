@@ -6,7 +6,6 @@ import { exportToExcel } from './export-excel.js';
 import { fetchTodayHours, fetchMonthHours, fetchActiveAlerts, fetchHoursByDateRange, fetchHoursByDevice, dismissAlert, checkAndCreateAlerts, exportHoursToExcel, initHoursFirebase, subscribeToHours, DAILY_GOAL_HOURS } from './firebase-hours.js';
 import { exportCampaignReportRows, fetchCampaignReports } from './firebase-reports.js';
 import { notifyDiscord } from './discord.js';
-import { compressVideoFile } from './video-compression.js';
 
 const app = document.querySelector('#app');
 const isDemo = !(hasFirebaseConfig && hasAppwriteConfig);
@@ -1776,7 +1775,7 @@ function bindVideoForm() {
   const progressText = document.getElementById('upload-progress-text');
   const progressPercent = document.getElementById('upload-progress-percent');
   const progressSteps = Array.from(document.querySelectorAll('#upload-progress-steps [data-stage]'));
-  const progressStageOrder = ['prepare', 'compress', 'upload', 'save'];
+  const progressStageOrder = ['prepare', 'upload', 'save'];
 
   const setUploadProgress = (progress, label = 'Preparando envio...', stage = 'prepare') => {
     const value = Math.max(0, Math.min(100, Math.round(progress || 0)));
@@ -1820,33 +1819,7 @@ function bindVideoForm() {
       const duration = formatVideoDuration(inspection.duration);
       setUploadProgress(8, 'Validando vídeo...', 'prepare');
 
-      let uploadFile = file;
-      let uploadInspection = inspection;
-      let compressionMeta = {
-        compressed: false,
-        originalSizeBytes: file.size,
-        compressedSizeBytes: file.size,
-      };
-
-      const compressionResult = await compressVideoFile(file, ({ stage, progress }) => {
-        const label = stage === 'loading' ? 'Carregando compressor...' : 'Comprimindo vídeo...';
-        const value = 8 + ((progress || 0) * 0.27);
-        setUploadProgress(value, label, 'compress');
-      });
-
-      uploadFile = compressionResult.file;
-      compressionMeta = {
-        compressed: compressionResult.compressed,
-        originalSizeBytes: compressionResult.originalSize,
-        compressedSizeBytes: compressionResult.compressedSize,
-      };
-
-      if (compressionResult.compressed) {
-        setUploadProgress(36, 'Validando vídeo comprimido...', 'compress');
-        uploadInspection = await inspectVideoFile(uploadFile);
-      } else {
-        setUploadProgress(36, 'Usando arquivo original...', 'compress');
-      }
+      const uploadFile = file;
 
       const payload = {
         title: String(formData.get('title')).trim(),
@@ -1854,12 +1827,11 @@ function bindVideoForm() {
         status: 'Ativo',
         checksumSha256: await calculateSha256(uploadFile),
         sizeBytes: uploadFile.size,
-        width: uploadInspection.width,
-        height: uploadInspection.height,
+        width: inspection.width,
+        height: inspection.height,
         container: 'mp4',
         playbackProfile: 'H.264/AAC Full HD',
         compatibilityCheckedAt: Date.now(),
-        compression: compressionMeta,
       };
 
       let uploadedMeta = {
@@ -1869,7 +1841,7 @@ function bindVideoForm() {
 
       if (hasAppwriteConfig && uploadFile) {
         const upload = await uploadVideo(uploadFile, (progress) => {
-          const uploadProgress = 38 + ((progress.progress || 0) * 0.57);
+          const uploadProgress = 15 + ((progress.progress || 0) * 0.8);
           setUploadProgress(uploadProgress, 'Enviando vídeo...', 'upload');
         });
         uploadedFileId = upload.fileId;
