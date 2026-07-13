@@ -711,30 +711,40 @@ function render() {
 
 function renderNav() {
   const nav = document.querySelector('#nav');
-  let currentSection = null;
-  const activeSection = getSectionForRoute(state.route);
+  if (!nav) return;
 
-  nav.innerHTML = navItems.map((item) => {
-    if (item.type === 'section') {
-      currentSection = item.key;
-      const isCollapsed = Boolean(state.collapsedNavSections[item.key]) && activeSection !== item.key;
-      return `
-        <button class="nav-section ${isCollapsed ? 'collapsed' : ''}" data-nav-section="${item.key}" type="button">
+  const allItems = navItems.filter((item) => item.type !== 'section');
+  const primaryRoutes = ['dashboard', 'monitor', 'map', 'devices', 'videos', 'playlists'];
+  const primaryItems = primaryRoutes
+    .map((route) => allItems.find((item) => item.key === route))
+    .filter(Boolean);
+  const secondaryItems = allItems.filter((item) => !primaryRoutes.includes(item.key));
+  const isSecondaryActive = secondaryItems.some((item) => item.key === state.route);
+
+  nav.innerHTML = `
+    <div class="app-nav-primary">
+      ${primaryItems.map((item) => `
+        <button class="nav-button ${state.route === item.key ? 'active' : ''}" data-route="${item.key}" type="button">
+          <span class="nav-icon">${item.icon}</span>
           <span>${item.label}</span>
-          <span class="nav-section-arrow">▾</span>
         </button>
-      `;
-    }
-
-    const isHidden = Boolean(state.collapsedNavSections[currentSection]) && activeSection !== currentSection;
-
-    return `
-      <button class="nav-button ${state.route === item.key ? 'active' : ''} ${isHidden ? 'hidden-by-section' : ''}" data-route="${item.key}">
-        <span class="nav-icon">${item.icon}</span>
-        <span>${item.label}</span>
-      </button>
-    `;
-  }).join('');
+      `).join('')}
+    </div>
+    <details class="app-nav-more" ${isSecondaryActive ? 'open' : ''}>
+      <summary class="nav-button more-button ${isSecondaryActive ? 'active' : ''}">
+        <span class="nav-icon">⋯</span>
+        <span>Mais</span>
+      </summary>
+      <div class="app-nav-menu">
+        ${secondaryItems.map((item) => `
+          <button class="nav-menu-item ${state.route === item.key ? 'active' : ''}" data-route="${item.key}" type="button">
+            <span class="nav-icon">${item.icon}</span>
+            <span>${item.label}</span>
+          </button>
+        `).join('')}
+      </div>
+    </details>
+  `;
 }
 
 function renderView() {

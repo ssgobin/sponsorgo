@@ -42,21 +42,12 @@
 export function appTemplate() {
   return `
     <div class="app-shell">
-      <aside class="sidebar">
-        <div class="brand sidebar-logo-wrap">
-          <img src="/sponsorgo.png" alt="SponsorGo" class="brand-logo-sidebar" />
-          <span class="product-chip">CENTRAL</span>
+      <header class="app-header">
+        <div class="app-brand">
+          <img src="/sponsorgo.png" alt="SponsorGo" class="app-brand-logo" />
         </div>
-        <nav id="nav" class="nav"></nav>
-        <div class="sidebar-footer">
-          <span class="system-dot"></span>
-          <div><p>Sistema operacional</p><strong>Firebase conectado</strong></div>
-        </div>
-        <div class="sidebar-brand">
-          <span class="brand-label">Desenvolvido por</span>
-          <img src="/logo_st.png" alt="SponsorTech" class="brand-logo" />
-        </div>
-      </aside>
+        <nav id="nav" class="app-nav" aria-label="Navegação principal"></nav>
+      </header>
       <main class="main">
         <div id="view"></div>
       </main>
