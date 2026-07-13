@@ -1319,7 +1319,7 @@ export function connectionsView(data) {
 }
 
 export function downloadAppView(data) {
-  const appDownloadLink = 'https://drive.google.com/file/d/1onCs_Qpkkwca5sz_ymxuz6udd1H7TagJ/view?usp=sharing';
+  const appDownloadLink = 'https://drive.google.com/file/d/1GLSCvTvA0XKgYwHwKPB6pT5zlVGtspIq/view?usp=sharing';
   
   return layoutView(
     'Baixar App',
