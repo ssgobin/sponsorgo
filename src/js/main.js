@@ -58,6 +58,12 @@ const state = {
     playlists: { search: '', status: '' },
     geofenceRules: { search: '', status: '' },
   },
+  pagination: {
+    devices: { page: 1, pageSize: 8 },
+    videos: { page: 1, pageSize: 8 },
+    playlists: { page: 1, pageSize: 8 },
+    geofenceRules: { page: 1, pageSize: 8 },
+  },
   alerts: [],
   savedAlerts: [],
   loading: true,
@@ -1108,6 +1114,7 @@ function bindForms() {
   bindConnectButtons();
   bindDeviceCommands();
   bindListFilters();
+  bindPagination();
   bindAppUpdateForm();
 }
 
@@ -1139,6 +1146,9 @@ function bindListFilters() {
       const key = input.dataset.filterKey;
       if (!state.listFilters[scope] || !key) return;
       state.listFilters[scope][key] = input.value;
+      if (state.pagination[scope]) {
+        state.pagination[scope].page = 1;
+      }
       const id = input.id;
       const selectionStart = input.selectionStart;
       const selectionEnd = input.selectionEnd;
@@ -1154,6 +1164,29 @@ function bindListFilters() {
     };
 
     input.addEventListener(input.tagName === 'SELECT' ? 'change' : 'input', updateFilter);
+  });
+}
+
+function bindPagination() {
+  document.querySelectorAll('[data-pagination-scope]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const scope = button.dataset.paginationScope;
+      const page = Number(button.dataset.page || 1);
+      if (!state.pagination[scope] || !Number.isFinite(page)) return;
+      state.pagination[scope].page = Math.max(1, page);
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-pagination-size]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const scope = select.dataset.paginationSize;
+      const pageSize = Number(select.value || 8);
+      if (!state.pagination[scope] || !Number.isFinite(pageSize)) return;
+      state.pagination[scope].page = 1;
+      state.pagination[scope].pageSize = pageSize;
+      render();
+    });
   });
 }
 

@@ -20,6 +20,58 @@ function safeCssClass(value, fallback = '') {
   return /^[a-z0-9_-]+$/i.test(text) ? text : fallback;
 }
 
+const DEFAULT_PAGE_SIZE = 8;
+
+function getPageInfo(data, scope, totalItems) {
+  const pagination = data.pagination?.[scope] || {};
+  const pageSize = Math.max(4, Number(pagination.pageSize || DEFAULT_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const currentPage = Math.min(Math.max(Number(pagination.page || 1), 1), totalPages);
+  const start = (currentPage - 1) * pageSize;
+  const end = Math.min(start + pageSize, totalItems);
+
+  return { currentPage, pageSize, totalPages, start, end, totalItems };
+}
+
+function renderPagination(scope, pageInfo) {
+  if (!pageInfo.totalItems) return '';
+
+  const pageButtons = Array.from({ length: pageInfo.totalPages }, (_, index) => index + 1)
+    .filter((page) => (
+      page === 1 ||
+      page === pageInfo.totalPages ||
+      Math.abs(page - pageInfo.currentPage) <= 1
+    ))
+    .reduce((items, page, index, pages) => {
+      if (index > 0 && page - pages[index - 1] > 1) {
+        items.push('<span class="pagination-ellipsis">...</span>');
+      }
+      items.push(`
+        <button class="pagination-page ${page === pageInfo.currentPage ? 'active' : ''}" data-pagination-scope="${scope}" data-page="${page}" type="button" ${page === pageInfo.currentPage ? 'aria-current="page"' : ''}>
+          ${page}
+        </button>
+      `);
+      return items;
+    }, [])
+    .join('');
+
+  return `
+    <div class="pagination" aria-label="Paginação">
+      <p class="pagination-summary">
+        Exibindo <strong>${pageInfo.start + 1}-${pageInfo.end}</strong> de <strong>${pageInfo.totalItems}</strong>
+      </p>
+      <div class="pagination-controls">
+        <button class="pagination-button" data-pagination-scope="${scope}" data-page="${pageInfo.currentPage - 1}" type="button" ${pageInfo.currentPage <= 1 ? 'disabled' : ''}>Anterior</button>
+        <div class="pagination-pages">${pageButtons}</div>
+        <button class="pagination-button" data-pagination-scope="${scope}" data-page="${pageInfo.currentPage + 1}" type="button" ${pageInfo.currentPage >= pageInfo.totalPages ? 'disabled' : ''}>Próxima</button>
+        <select class="select pagination-size" data-pagination-size="${scope}" aria-label="Itens por página">
+          ${[4, 8, 12, 20].map((size) => `<option value="${size}" ${pageInfo.pageSize === size ? 'selected' : ''}>${size}/página</option>`).join('')}
+        </select>
+      </div>
+    </div>
+  `;
+}
+
 function getLocalDateString(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -241,7 +293,9 @@ export function dashboardView(data) {
 export function devicesView(data) {
   const allowManualDeviceForm = Boolean(data.isDemo);
   const filters = data.listFilters?.devices || { search: '', status: '' };
-  const devices = data.filteredDevices || data.devices;
+  const allDevices = data.filteredDevices || data.devices;
+  const pageInfo = getPageInfo(data, 'devices', allDevices.length);
+  const devices = allDevices.slice(pageInfo.start, pageInfo.end);
   const videos = data.videos || [];
   const items = devices.length > 0 ? devices.map((device) => `
     <div class="list-item" data-device-id="${escapeAttr(device.id)}">
@@ -266,8 +320,8 @@ export function devicesView(data) {
     'Tablets',
     'Gerencie os tablets que vão mostrar seus vídeos.',
     `
-      <section class="grid-2">
-        <article class="card">
+      <section class="grid-2 management-grid">
+        <article class="card form-card">
           <div class="card-header">
             <div>
               <h3 class="card-title">Adicionar Novo Tablet</h3>
@@ -290,8 +344,8 @@ export function devicesView(data) {
             <button class="button primary" type="submit">Cadastrar Tablet</button>
           </form>
         </article>
-        <article class="card">
-          <div class="card-header"><div><h3 class="card-title">Tablets Cadastrados</h3><p class="card-subtitle">${devices.length} de ${data.devices.length} tablets exibidos</p></div></div>
+        <article class="card list-card">
+          <div class="card-header"><div><h3 class="card-title">Tablets Cadastrados</h3><p class="card-subtitle">${allDevices.length} de ${data.devices.length} tablets encontrados</p></div></div>
           <div class="filter-controls list-filters">
             <input id="devices-search" class="input" data-filter-scope="devices" data-filter-key="search" value="${escapeAttr(filters.search)}" placeholder="Buscar por tablet, veículo ou motorista" />
             <select id="devices-status" class="select" data-filter-scope="devices" data-filter-key="status">
@@ -300,7 +354,7 @@ export function devicesView(data) {
               <option value="offline" ${filters.status === 'offline' ? 'selected' : ''}>Parados</option>
             </select>
           </div>
-          ${items ? `<div class="list">${items}</div>` : `<div class="empty-state"><h3>Nenhum tablet encontrado</h3><p>Ajuste a busca ou os filtros.</p></div>`}
+          ${items ? `<div class="list">${items}</div>${renderPagination('devices', pageInfo)}` : `<div class="empty-state"><h3>Nenhum tablet encontrado</h3><p>Ajuste a busca ou os filtros.</p></div>`}
         </article>
       </section>
     `,
@@ -309,7 +363,9 @@ export function devicesView(data) {
 }
 export function videosView(data) {
   const filters = data.listFilters?.videos || { search: '', status: '' };
-  const videos = data.filteredVideos || data.videos;
+  const allVideos = data.filteredVideos || data.videos;
+  const pageInfo = getPageInfo(data, 'videos', allVideos.length);
+  const videos = allVideos.slice(pageInfo.start, pageInfo.end);
   const items = videos.length > 0 ? videos.map((video) => {
     const viewUrl = video.viewUrl || '';
     const downloadUrl = video.downloadUrl || viewUrl;
@@ -332,8 +388,8 @@ export function videosView(data) {
     'Vídeos',
     'Adicione vídeos para mostrar nos tablets.',
     `
-      <section class="grid-2">
-        <article class="card">
+      <section class="grid-2 management-grid">
+        <article class="card form-card">
           <div class="card-header"><div><h3 class="card-title">Enviar Novo Vídeo</h3><p class="card-subtitle">Adicione um vídeo à sua biblioteca</p></div></div>
           <form id="video-form" class="list">
             <div class="form-row"><div class="form-group"><label>Título do Vídeo</label><input class="input" name="title" placeholder="Promo Abril 01" required /></div></div>
@@ -359,8 +415,8 @@ export function videosView(data) {
             <button class="button primary" type="submit">Enviar Vídeo</button>
           </form>
         </article>
-        <article class="card">
-          <div class="card-header"><div><h3 class="card-title">Biblioteca de Vídeos</h3><p class="card-subtitle">${videos.length} de ${data.videos.length} vídeos exibidos</p></div></div>
+        <article class="card list-card">
+          <div class="card-header"><div><h3 class="card-title">Biblioteca de Vídeos</h3><p class="card-subtitle">${allVideos.length} de ${data.videos.length} vídeos encontrados</p></div></div>
           <div class="filter-controls list-filters">
             <input id="videos-search" class="input" data-filter-scope="videos" data-filter-key="search" value="${escapeAttr(filters.search)}" placeholder="Buscar por título ou arquivo" />
             <select id="videos-status" class="select" data-filter-scope="videos" data-filter-key="status">
@@ -370,7 +426,7 @@ export function videosView(data) {
               <option value="rascunho" ${filters.status === 'rascunho' ? 'selected' : ''}>Rascunho</option>
             </select>
           </div>
-          ${items ? `<div class="list">${items}</div>` : `<div class="empty-state"><h3>Nenhum vídeo encontrado</h3><p>Ajuste a busca ou envie um novo vídeo.</p></div>`}
+          ${items ? `<div class="list">${items}</div>${renderPagination('videos', pageInfo)}` : `<div class="empty-state"><h3>Nenhum vídeo encontrado</h3><p>Ajuste a busca ou envie um novo vídeo.</p></div>`}
         </article>
       </section>
     `,
@@ -379,7 +435,9 @@ export function videosView(data) {
 }
 export function playlistsView(data) {
   const filters = data.listFilters?.playlists || { search: '', status: '' };
-  const playlists = data.filteredPlaylists || data.playlists;
+  const allPlaylists = data.filteredPlaylists || data.playlists;
+  const pageInfo = getPageInfo(data, 'playlists', allPlaylists.length);
+  const playlists = allPlaylists.slice(pageInfo.start, pageInfo.end);
   const items = playlists.length > 0 ? playlists.map((playlist) => `
     <div class="list-item">
       <div>
@@ -398,8 +456,8 @@ export function playlistsView(data) {
     'Playlists',
     'Crie listas de vídeos para os tablets.',
     `
-      <section class="grid-2">
-        <article class="card">
+      <section class="grid-2 management-grid">
+        <article class="card form-card">
           <div class="card-header"><div><h3 class="card-title">Nova Playlist</h3><p class="card-subtitle">Escolha quais vídeos terão e quais tablets receberão</p></div></div>
           <form id="playlist-form" class="list">
             <div class="form-group"><label>Nome da Playlist</label><input class="input" name="name" placeholder="Campanha Abril" required /></div>
@@ -430,8 +488,8 @@ export function playlistsView(data) {
             <button class="button primary" type="submit">Criar Playlist</button>
           </form>
         </article>
-        <article class="card">
-          <div class="card-header"><div><h3 class="card-title">Playlists Criadas</h3><p class="card-subtitle">${playlists.length} de ${data.playlists.length} playlists exibidas</p></div></div>
+        <article class="card list-card">
+          <div class="card-header"><div><h3 class="card-title">Playlists Criadas</h3><p class="card-subtitle">${allPlaylists.length} de ${data.playlists.length} playlists encontradas</p></div></div>
           <div class="filter-controls list-filters">
             <input id="playlists-search" class="input" data-filter-scope="playlists" data-filter-key="search" value="${escapeAttr(filters.search)}" placeholder="Buscar por nome" />
             <select id="playlists-status" class="select" data-filter-scope="playlists" data-filter-key="status">
@@ -441,7 +499,7 @@ export function playlistsView(data) {
               <option value="inativa" ${filters.status === 'inativa' ? 'selected' : ''}>Inativas</option>
             </select>
           </div>
-          ${items ? `<div class="list">${items}</div>` : `<div class="empty-state"><h3>Nenhuma playlist encontrada</h3><p>Ajuste a busca ou crie uma nova playlist.</p></div>`}
+          ${items ? `<div class="list">${items}</div>${renderPagination('playlists', pageInfo)}` : `<div class="empty-state"><h3>Nenhuma playlist encontrada</h3><p>Ajuste a busca ou crie uma nova playlist.</p></div>`}
         </article>
       </section>
     `,
@@ -454,6 +512,8 @@ export function geofencingView(data) {
   const playlists = data.playlists || [];
   const filters = data.listFilters?.geofenceRules || { search: '', status: '' };
   const filteredRules = data.filteredGeofenceRules || rules;
+  const pageInfo = getPageInfo(data, 'geofenceRules', filteredRules.length);
+  const visibleRules = filteredRules.slice(pageInfo.start, pageInfo.end);
 
   const playlistOptions = playlists.map((playlist) => `
     <option value="${escapeAttr(playlist.id)}">${escapeHtml(playlist.name || playlist.id)}</option>
@@ -464,7 +524,7 @@ export function geofencingView(data) {
     return playlist?.name || playlistId || '—';
   };
 
-  const ruleItems = filteredRules.length > 0 ? filteredRules.map((rule) => {
+  const ruleItems = visibleRules.length > 0 ? visibleRules.map((rule) => {
     const location = [
       rule.state ? `UF: ${rule.state}` : '',
       rule.city ? `Cidade: ${rule.city}` : '',
@@ -491,8 +551,8 @@ export function geofencingView(data) {
     'Geofencing',
     'Troque playlists automaticamente por estado, cidade, bairro ou regiao.',
     `
-      <section class="grid-2">
-        <article class="card">
+      <section class="grid-2 management-grid">
+        <article class="card form-card">
           <div class="card-header">
             <div>
               <h3 class="card-title">Nova Regra de Região</h3>
@@ -531,7 +591,7 @@ export function geofencingView(data) {
             <button class="button primary" type="submit">Salvar Regra</button>
           </form>
         </article>
-        <article class="card">
+        <article class="card list-card">
           <div class="card-header">
             <div>
               <h3 class="card-title">Regras Cadastradas</h3>
@@ -546,7 +606,7 @@ export function geofencingView(data) {
               <option value="inactive" ${filters.status === 'inactive' ? 'selected' : ''}>Inativas</option>
             </select>
           </div>
-          ${ruleItems ? `<div class="list">${ruleItems}</div>` : '<div class="empty-state"><h3>Nenhuma regra encontrada</h3><p>Crie uma regra para trocar campanhas automaticamente por localização.</p></div>'}
+          ${ruleItems ? `<div class="list">${ruleItems}</div>${renderPagination('geofenceRules', pageInfo)}` : '<div class="empty-state"><h3>Nenhuma regra encontrada</h3><p>Crie uma regra para trocar campanhas automaticamente por localização.</p></div>'}
         </article>
       </section>
     `,
