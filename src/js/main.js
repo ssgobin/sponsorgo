@@ -713,38 +713,37 @@ function renderNav() {
   const nav = document.querySelector('#nav');
   if (!nav) return;
 
-  const allItems = navItems.filter((item) => item.type !== 'section');
-  const primaryRoutes = ['dashboard', 'monitor', 'map', 'devices', 'videos', 'playlists'];
-  const primaryItems = primaryRoutes
-    .map((route) => allItems.find((item) => item.key === route))
-    .filter(Boolean);
-  const secondaryItems = allItems.filter((item) => !primaryRoutes.includes(item.key));
-  const isSecondaryActive = secondaryItems.some((item) => item.key === state.route);
+  const groups = [];
+  let currentGroup = null;
 
-  nav.innerHTML = `
-    <div class="app-nav-primary">
-      ${primaryItems.map((item) => `
-        <button class="nav-button ${state.route === item.key ? 'active' : ''}" data-route="${item.key}" type="button">
-          <span class="nav-icon">${item.icon}</span>
-          <span>${item.label}</span>
-        </button>
-      `).join('')}
-    </div>
-    <details class="app-nav-more" ${isSecondaryActive ? 'open' : ''}>
-      <summary class="nav-button more-button ${isSecondaryActive ? 'active' : ''}">
-        <span class="nav-icon">⋯</span>
-        <span>Mais</span>
-      </summary>
-      <div class="app-nav-menu">
-        ${secondaryItems.map((item) => `
-          <button class="nav-menu-item ${state.route === item.key ? 'active' : ''}" data-route="${item.key}" type="button">
-            <span class="nav-icon">${item.icon}</span>
+  navItems.forEach((item) => {
+    if (item.type === 'section') {
+      currentGroup = { key: item.key, label: item.label, items: [] };
+      groups.push(currentGroup);
+      return;
+    }
+
+    if (!currentGroup) {
+      currentGroup = { key: 'main', label: 'Menu', items: [] };
+      groups.push(currentGroup);
+    }
+
+    currentGroup.items.push(item);
+  });
+
+  nav.innerHTML = groups.map((group) => `
+    <div class="app-nav-group" data-section="${group.key}">
+      <span class="app-nav-label">${group.label}</span>
+      <div class="app-nav-items">
+        ${group.items.map((item) => `
+          <button class="nav-button ${state.route === item.key ? 'active' : ''}" data-route="${item.key}" type="button" aria-current="${state.route === item.key ? 'page' : 'false'}">
+            <span class="nav-icon" aria-hidden="true">${item.icon}</span>
             <span>${item.label}</span>
           </button>
         `).join('')}
       </div>
-    </details>
-  `;
+    </div>
+  `).join('');
 }
 
 function renderView() {

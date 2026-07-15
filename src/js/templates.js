@@ -42,12 +42,23 @@
 export function appTemplate() {
   return `
     <div class="app-shell">
-      <header class="app-header">
+      <aside class="app-sidebar">
         <div class="app-brand">
           <img src="/sponsorgo.png" alt="SponsorGo" class="app-brand-logo" />
+          <div class="app-brand-text">
+            <strong>Central</strong>
+            <span>Operação SponsorGo</span>
+          </div>
         </div>
         <nav id="nav" class="app-nav" aria-label="Navegação principal"></nav>
-      </header>
+        <div class="app-sidebar-footer">
+          <span class="system-dot"></span>
+          <div>
+            <strong>Sistema online</strong>
+            <span>Monitoramento ativo</span>
+          </div>
+        </div>
+      </aside>
       <main class="main">
         <div id="view"></div>
       </main>
@@ -57,7 +68,7 @@ export function appTemplate() {
 
 export function layoutView(title, subtitle, content, extraActions = '') {
   return `
-    <div class="topbar">
+    <div class="topbar page-hero">
       <div class="topbar-info">
         <span class="eyebrow">SponsorGo Central</span>
         <h2>${title}</h2>
