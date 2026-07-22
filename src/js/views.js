@@ -118,6 +118,28 @@ function formatDate(timestamp) {
   return '—';
 }
 
+function timestampToDate(timestamp) {
+  if (!timestamp) return null;
+  if (timestamp.toDate) return timestamp.toDate();
+  if (typeof timestamp === 'object' && typeof timestamp.seconds === 'number') {
+    return new Date(timestamp.seconds * 1000);
+  }
+  const date = new Date(timestamp);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function formatLastContact(timestamp) {
+  const date = timestampToDate(timestamp);
+  if (!date) return '—';
+  return date.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function formatDeviceStatus(status) {
   if (status === 'online') return 'Ativo';
   if (status === 'offline') return 'Parado';
@@ -128,16 +150,16 @@ function formatDeviceStatus(status) {
 function getDeviceCurrentVideoTitle(device, videos = []) {
   const currentVideo = device?.currentVideo;
   const candidates = [
+    device?.currentVideoName,
+    device?.videoName,
+    device?.playingVideoName,
+    device?.nowPlaying,
     device?.currentVideoId,
     typeof currentVideo === 'object' ? currentVideo?.id : currentVideo,
     typeof currentVideo === 'object' ? currentVideo?.title : '',
     typeof currentVideo === 'object' ? currentVideo?.name : '',
-    device?.currentVideoName,
-    device?.videoName,
     device?.videoId,
-    device?.playingVideoName,
     device?.playingVideoId,
-    device?.nowPlaying,
   ].filter(Boolean);
 
   for (const candidate of candidates) {
@@ -204,17 +226,15 @@ export function dashboardView(data) {
   `;
 
   const deviceRows = devices.map((device) => {
-    const lastContact = device.lastHeartbeat 
-      ? (device.lastHeartbeat.toDate ? device.lastHeartbeat.toDate() : new Date(device.lastHeartbeat))
-      : null;
+    const lastContact = device.lastHeartbeat || device.lastSeen || device.updatedAt;
     return `
     <tr data-device-id="${escapeAttr(device.id)}">
       <td><strong>${escapeHtml(device.name || '—')}</strong><div class="card-subtitle">${escapeHtml(device.id || '—')}</div></td>
       <td>${escapeHtml(device.car || '—')}</td>
       <td><span class="status ${safeCssClass(device.status, 'offline')}">${formatDeviceStatus(device.status)}</span></td>
       <td data-current-video>${escapeHtml(getDeviceCurrentVideoTitle(device, videos))}</td>
-      <td>${formatDate(lastContact) || '—'}</td>
-      <td>${device.battery >= 0 ? `${device.battery}%` : '—'}</td>
+      <td data-last-contact>${formatLastContact(lastContact)}</td>
+      <td data-battery>${device.battery >= 0 ? `${device.battery}%` : '—'}</td>
       <td style="width:80px;">
         <button class="button-edit" data-edit="tablet" data-id="${escapeAttr(device.id)}" title="Editar">✎</button>
         <button class="button-delete" data-delete="tablet" data-id="${escapeAttr(device.id)}" title="Excluir">✕</button>
@@ -297,24 +317,28 @@ export function devicesView(data) {
   const pageInfo = getPageInfo(data, 'devices', allDevices.length);
   const devices = allDevices.slice(pageInfo.start, pageInfo.end);
   const videos = data.videos || [];
-  const items = devices.length > 0 ? devices.map((device) => `
-    <div class="list-item" data-device-id="${escapeAttr(device.id)}">
-      <div>
-        <p class="list-item-title">${escapeHtml(device.name || '—')}</p>
-        <p class="list-item-subtitle">${escapeHtml(device.id || '—')} • ${escapeHtml(device.car || 'Sem veículo')} • ${escapeHtml(device.driver || 'Sem motorista')}</p>
-        <p class="list-item-subtitle">Vídeo atual: <span data-current-video>${escapeHtml(getDeviceCurrentVideoTitle(device, videos))}</span></p>
+  const items = devices.length > 0 ? devices.map((device) => {
+    const lastContact = device.lastHeartbeat || device.lastSeen || device.updatedAt;
+    return `
+      <div class="list-item" data-device-id="${escapeAttr(device.id)}">
+        <div>
+          <p class="list-item-title">${escapeHtml(device.name || '—')}</p>
+          <p class="list-item-subtitle">${escapeHtml(device.id || '—')} • ${escapeHtml(device.car || 'Sem veículo')} • ${escapeHtml(device.driver || 'Sem motorista')}</p>
+          <p class="list-item-subtitle">Vídeo atual: <span data-current-video>${escapeHtml(getDeviceCurrentVideoTitle(device, videos))}</span></p>
+          <p class="list-item-subtitle">Último contato: <span data-last-contact>${formatLastContact(lastContact)}</span></p>
+        </div>
+        <div class="row wrap" style="align-items:center;gap:8px;">
+          <span class="status ${safeCssClass(device.status, 'offline')}">${formatDeviceStatus(device.status)}</span>
+          ${device.lastStabilityIssue?.type ? `<span class="pill warning" title="${escapeAttr(String(device.lastStabilityIssue.trace || '').slice(0, 500))}">${escapeHtml(device.lastStabilityIssue.type)} detectado</span>` : ''}
+          <span class="pill" data-battery data-battery-label="true">${device.battery || device.battery === 0 ? `${device.battery}% bateria` : 'Bateria —'}</span>
+          ${device.ownerUid ? `<button class="button compact secondary" data-device-command="SYNC_NOW" data-device-id="${escapeAttr(device.id)}">Sincronizar</button>` : '<span class="pill warning">Identidade pendente</span>'}
+          ${device.ownerUid ? `<button class="button-icon" data-device-command="FLUSH_TELEMETRY" data-device-id="${escapeAttr(device.id)}" title="Enviar telemetria agora">↥</button>` : ''}
+          <button class="button-edit" data-edit="tablet" data-id="${escapeAttr(device.id)}" title="Editar">✎</button>
+          <button class="button-delete" data-delete="tablet" data-id="${escapeAttr(device.id)}" title="Excluir">✕</button>
+        </div>
       </div>
-      <div class="row wrap" style="align-items:center;gap:8px;">
-        <span class="status ${safeCssClass(device.status, 'offline')}">${formatDeviceStatus(device.status)}</span>
-        ${device.lastStabilityIssue?.type ? `<span class="pill warning" title="${escapeAttr(String(device.lastStabilityIssue.trace || '').slice(0, 500))}">${escapeHtml(device.lastStabilityIssue.type)} detectado</span>` : ''}
-        ${device.battery || device.battery === 0 ? `<span class="pill">${device.battery}% bateria</span>` : ''}
-        ${device.ownerUid ? `<button class="button compact secondary" data-device-command="SYNC_NOW" data-device-id="${escapeAttr(device.id)}">Sincronizar</button>` : '<span class="pill warning">Identidade pendente</span>'}
-        ${device.ownerUid ? `<button class="button-icon" data-device-command="FLUSH_TELEMETRY" data-device-id="${escapeAttr(device.id)}" title="Enviar telemetria agora">↥</button>` : ''}
-        <button class="button-edit" data-edit="tablet" data-id="${escapeAttr(device.id)}" title="Editar">✎</button>
-        <button class="button-delete" data-delete="tablet" data-id="${escapeAttr(device.id)}" title="Excluir">✕</button>
-      </div>
-    </div>
-  `).join('') : '';
+    `;
+  }).join('') : '';
 
   return layoutView(
     'Tablets',
@@ -615,16 +639,14 @@ export function geofencingView(data) {
 }
 export function monitorView(data) {
   const rows = data.devices.length > 0 ? data.devices.map((device) => {
-    const lastContact = device.lastHeartbeat 
-      ? (device.lastHeartbeat.toDate ? device.lastHeartbeat.toDate() : new Date(device.lastHeartbeat))
-      : null;
+    const lastContact = device.lastHeartbeat || device.lastSeen || device.updatedAt;
     return `
     <tr data-device-id="${escapeAttr(device.id)}">
       <td><strong>${escapeHtml(device.name || '—')}</strong></td>
       <td><span class="status ${safeCssClass(device.status, 'offline')}">${formatDeviceStatus(device.status)}</span></td>
       <td data-current-video>${escapeHtml(getDeviceCurrentVideoTitle(device, data.videos || []))}</td>
-      <td>${formatDate(lastContact) || '—'}</td>
-      <td>${device.battery >= 0 ? `${device.battery}%` : '—'}</td>
+      <td data-last-contact>${formatLastContact(lastContact)}</td>
+      <td data-battery>${device.battery >= 0 ? `${device.battery}%` : '—'}</td>
       <td style="width:50px;"><button class="button-edit" data-edit="tablet" data-id="${escapeAttr(device.id)}" title="Editar">✎</button></td>
     </tr>
   `}).join('') : '';

@@ -1859,3 +1859,250 @@ tbody tr:hover td {
     padding: 24px;
   }
 }
+
+@media (max-width: 1360px) and (min-width: 981px) {
+  .app-shell {
+    grid-template-columns: 216px minmax(0, 1fr);
+  }
+
+  .app-sidebar {
+    gap: 14px;
+    padding: 14px;
+  }
+
+  .app-brand {
+    gap: 8px;
+    padding: 6px 6px 12px;
+  }
+
+  .app-brand-logo {
+    width: 110px;
+    height: 34px;
+  }
+
+  .app-brand-text {
+    display: none;
+  }
+
+  .nav-button {
+    min-height: 38px;
+    gap: 8px;
+    padding: 9px;
+    font-size: 13px;
+  }
+
+  .nav-icon {
+    width: 22px;
+    height: 22px;
+    flex-basis: 22px;
+  }
+
+  .main {
+    padding: 18px 18px 32px;
+  }
+
+  .page-hero {
+    min-height: 112px;
+  }
+}
+
+@media (max-width: 1180px) and (min-width: 981px) {
+  .app-shell {
+    grid-template-columns: 74px minmax(0, 1fr);
+  }
+
+  .app-sidebar {
+    padding: 12px 10px;
+  }
+
+  .app-brand {
+    justify-content: center;
+  }
+
+  .app-brand-logo {
+    width: 44px;
+    height: 34px;
+    object-fit: cover;
+    object-position: left center;
+  }
+
+  .app-nav-label,
+  .app-sidebar-footer,
+  .nav-button span:last-child {
+    display: none;
+  }
+
+  .app-nav-group {
+    margin-bottom: 12px;
+  }
+
+  .nav-button {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 1100px) {
+  body {
+    overflow: auto;
+  }
+
+  .app-shell {
+    display: block;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .app-sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 80;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 12px;
+    padding: 10px 12px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  }
+
+  .app-brand {
+    padding: 0;
+    border-bottom: 0;
+  }
+
+  .app-brand-logo {
+    width: 118px;
+    height: 36px;
+    object-fit: contain;
+  }
+
+  .app-brand-text,
+  .app-sidebar-footer,
+  .app-nav-label {
+    display: none;
+  }
+
+  .app-nav {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+  }
+
+  .app-nav,
+  .app-nav-group,
+  .app-nav-items {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+  }
+
+  .app-nav-group {
+    flex: 0 0 auto;
+  }
+
+  .nav-button {
+    min-height: 38px;
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .main {
+    overflow: visible;
+    padding: 16px 14px 32px;
+  }
+}
+
+@media (max-width: 1240px) {
+  .grid-4 {
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  }
+
+  .grid-3 {
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  }
+
+  .grid-2 {
+    grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+  }
+
+  .management-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  table {
+    min-width: 680px;
+  }
+
+  .topbar,
+  .card-header,
+  .list-item,
+  .connection-card,
+  .pagination,
+  .report-toolbar,
+  .list-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .actions,
+  .actions .button,
+  .filter-controls,
+  .filter-controls .input,
+  .filter-controls .select,
+  .filter-controls .button {
+    width: 100%;
+  }
+
+  .list-item > .row,
+  .connection-card > .row {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 520px) {
+  .main {
+    padding: 10px 8px 24px;
+  }
+
+  .card,
+  .page-hero {
+    padding: 12px;
+  }
+
+  table {
+    min-width: 620px;
+  }
+}
+
+@media (max-width: 700px) {
+  .app-sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .app-brand {
+    display: none;
+  }
+
+  .nav-button span:last-child {
+    display: none;
+  }
+
+  .nav-button {
+    min-width: 42px;
+    justify-content: center;
+    padding: 9px;
+  }
+
+  .grid-2,
+  .grid-3,
+  .grid-4,
+  .management-grid,
+  .month-summary,
+  .upload-progress-steps,
+  .form-row,
+  .form-row.three {
+    grid-template-columns: 1fr;
+  }
+}

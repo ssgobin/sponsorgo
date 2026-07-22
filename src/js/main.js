@@ -250,6 +250,18 @@ function getTimestampMs(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function formatLastContact(value) {
+  const timestamp = getTimestampMs(value);
+  if (!timestamp) return '—';
+  return new Date(timestamp).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function normalizeCoordinate(value) {
   if (value == null || value === '') return null;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -302,16 +314,16 @@ function normalizeDevicesStatus(devicesData) {
 function getDeviceCurrentVideoTitle(device, videos = state.videos) {
   const currentVideo = device?.currentVideo;
   const candidates = [
+    device?.currentVideoName,
+    device?.videoName,
+    device?.playingVideoName,
+    device?.nowPlaying,
     device?.currentVideoId,
     typeof currentVideo === 'object' ? currentVideo?.id : currentVideo,
     typeof currentVideo === 'object' ? currentVideo?.title : '',
     typeof currentVideo === 'object' ? currentVideo?.name : '',
-    device?.currentVideoName,
-    device?.videoName,
     device?.videoId,
-    device?.playingVideoName,
     device?.playingVideoId,
-    device?.nowPlaying,
   ].filter(Boolean);
 
   for (const candidate of candidates) {
@@ -2229,6 +2241,17 @@ function updateDeviceStatusUI(devices) {
 
       row.querySelectorAll('[data-current-video]').forEach((videoEl) => {
         videoEl.textContent = getDeviceCurrentVideoTitle(device);
+      });
+
+      row.querySelectorAll('[data-last-contact]').forEach((contactEl) => {
+        contactEl.textContent = formatLastContact(device.lastHeartbeat || device.lastSeen || device.updatedAt);
+      });
+
+      row.querySelectorAll('[data-battery]').forEach((batteryEl) => {
+        const hasBattery = typeof device.battery === 'number' && device.battery >= 0;
+        batteryEl.textContent = hasBattery
+          ? `${device.battery}%${batteryEl.dataset.batteryLabel === 'true' ? ' bateria' : ''}`
+          : (batteryEl.dataset.batteryLabel === 'true' ? 'Bateria —' : '—');
       });
     }
   });
